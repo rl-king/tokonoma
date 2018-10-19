@@ -1,0 +1,7 @@
+.stack-work/
+tokonoma.cabal
+*~
+elm-stuff
+cache
+index.html
+main.js
