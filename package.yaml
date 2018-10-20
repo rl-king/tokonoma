@@ -19,9 +19,11 @@ dependencies:
   - directory
   - http-client
   - http-client-tls
+  - mtl
   - servant
   - servant-server
   - servant-auth
+  - servant-auth-server
   - text
   - wai
   - wai-extra
