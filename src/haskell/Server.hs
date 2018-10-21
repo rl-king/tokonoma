@@ -9,14 +9,16 @@ import Network.Wai.Middleware.Gzip
 import Control.Monad.Trans (liftIO)
 import Data.Aeson (FromJSON, ToJSON)
 import GHC.Generics (Generic)
+import qualified Data.ByteString.Lazy.Char8 as BS
 import Servant
 import Servant.Auth.Server as Server
 import Servant.Auth.Server.SetCookieOrphan ()
 import System.IO
+import Debug.Trace
 
 
-type Api auths =
-  (Server.Auth auths User :> Protected) :<|>
+type Api =
+  (Server.Auth '[Cookie] User :> Protected) :<|>
   Public
 
 
@@ -36,7 +38,7 @@ type CredHeaders =
            ] User
 
 
-api :: Proxy (Api '[Cookie])
+api :: Proxy Api
 api = Proxy
 
 
@@ -46,7 +48,10 @@ run = do
   let jwtSettings =
         defaultJWTSettings key
       cookieSettings =
-        defaultCookieSettings { cookieIsSecure  = NotSecure }
+        defaultCookieSettings
+        { cookieIsSecure = NotSecure
+        , cookieSameSite = SameSiteStrict
+        }
       context =
          cookieSettings :. jwtSettings :. EmptyContext
   Warp.runSettings settings .
@@ -63,7 +68,7 @@ settings =
   where port = 8080
 
 
-server :: CookieSettings -> JWTSettings -> Server (Api auths)
+server :: CookieSettings -> JWTSettings -> Server Api
 server cs jwts =
   protected :<|>
   public cs jwts
@@ -75,8 +80,8 @@ protected authResult =
     (Server.Authenticated user) ->
       return (name user) :<|>
       return (email user)
-    _ ->
-      throwAll err401
+    x ->
+      throwAll err401{ errBody = BS.pack $ show  x }
 
 
 public :: CookieSettings -> JWTSettings -> Server Public
