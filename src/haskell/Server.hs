@@ -14,7 +14,6 @@ import Servant
 import Servant.Auth.Server as Server
 import Servant.Auth.Server.SetCookieOrphan ()
 import System.IO
-import Debug.Trace
 
 
 type Api =
@@ -23,8 +22,7 @@ type Api =
 
 
 type Protected =
-  "name" :> Get '[JSON] String :<|>
-  "email" :> Get '[JSON] String
+  "status" :> Get '[JSON] User
 
 
 type Public =
@@ -78,10 +76,9 @@ protected :: Server.AuthResult User -> Server Protected
 protected authResult =
   case authResult of
     (Server.Authenticated user) ->
-      return (name user) :<|>
-      return (email user)
-    x ->
-      throwAll err401{ errBody = BS.pack $ show  x }
+      return user
+    err ->
+      throwAll err401{ errBody = BS.pack $ show err }
 
 
 public :: CookieSettings -> JWTSettings -> Server Public
@@ -102,6 +99,7 @@ data User =
 
 instance ToJSON User
 instance FromJSON User
+
 
 instance ToJWT User
 instance FromJWT User
@@ -124,7 +122,7 @@ instance FromJSON Login
 checkCredentials :: CookieSettings -> JWTSettings -> Login -> Handler CredHeaders
 checkCredentials cookieSettings jwtSettings (Login "admin" "admin") = do
    let usr =
-         User "Ali Baba" "ali@email.com"
+         User "Administrator" "hello@tokonoma.com"
    maybeAddCookies <- liftIO $ acceptLogin cookieSettings jwtSettings usr
    case maybeAddCookies of
      Nothing ->

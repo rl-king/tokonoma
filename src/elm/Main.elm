@@ -50,28 +50,28 @@ main =
 
 type alias Model =
     { key : Browser.Navigation.Key
-    , name : String
+    , auth : Auth
     , username : String
     , password : String
     }
 
 
+type Auth
+    = Auth User
+    | Anonymous
+    | Loading
+
+
 init : flags -> Url -> Browser.Navigation.Key -> ( Model, Cmd Msg )
 init _ location key =
     ( { key = key
-      , name = ""
+      , auth = Loading
       , username = ""
       , password = ""
       }
-    , Cmd.none
+    , Http.send GotUser <|
+        Http.get "/status" decodeUser
     )
-
-
-json username password =
-    Encode.object
-        [ ( "username", Encode.string username )
-        , ( "password", Encode.string password )
-        ]
 
 
 
@@ -81,12 +81,10 @@ json username password =
 type Msg
     = OnUrlChange Url
     | OnUrlRequest Browser.UrlRequest
-    | GotLogin (Result Http.Error User)
     | OnUsernameInput String
     | OnPasswordInput String
     | PerformLogin
-    | GetName
-    | GotName (Result Http.Error String)
+    | GotUser (Result Http.Error User)
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -110,32 +108,21 @@ update msg model =
         PerformLogin ->
             let
                 body =
-                    json model.username model.password
+                    Encode.object
+                        [ ( "username", Encode.string model.username )
+                        , ( "password", Encode.string model.password )
+                        ]
             in
             ( model
-            , Http.send GotLogin <|
+            , Http.send GotUser <|
                 Http.post "/login" (Http.jsonBody body) decodeUser
             )
 
-        GotLogin res ->
-            let
-                _ =
-                    Debug.log "gotlogin" res
-            in
-            ( model, Cmd.none )
+        GotUser (Ok user) ->
+            ( { model | auth = Auth user }, Cmd.none )
 
-        GetName ->
-            ( model
-            , Http.send GotName <|
-                Http.get "/name" Decode.string
-            )
-
-        GotName res ->
-            let
-                _ =
-                    Debug.log "gotname" res
-            in
-            ( model, Cmd.none )
+        GotUser res ->
+            ( { model | auth = Anonymous }, Cmd.none )
 
 
 
@@ -154,6 +141,7 @@ viewBody model =
     main_ [ css styling.main ]
         [ global globalStyling
         , text "Tokonoma"
+        , text (Debug.toString model.auth)
         , Html.Styled.form [ onSubmit PerformLogin ]
             [ label [] [ text "Username" ]
             , input [ onInput OnUsernameInput ] []
@@ -161,7 +149,6 @@ viewBody model =
             , input [ onInput OnPasswordInput ] []
             , button [] [ text "Login" ]
             ]
-        , button [ onClick GetName ] [ text "get name" ]
         ]
 
 
