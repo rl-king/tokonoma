@@ -4,16 +4,30 @@
 {-# LANGUAGE TypeOperators #-}
 module Server where
 
-import qualified Network.Wai.Handler.Warp as Warp
-import Network.Wai.Middleware.Gzip
-import Control.Monad.Trans (liftIO)
+import Control.Concurrent.STM.TVar (TVar, newTVar, readTVar, writeTVar)
+import Control.Monad.IO.Class (liftIO)
+import Control.Monad.STM (atomically)
+import Control.Monad.Trans.Reader (ReaderT, ask, runReaderT)
 import Data.Aeson (FromJSON, ToJSON)
 import Data.Text (Text)
 import GHC.Generics (Generic)
+import qualified Network.Wai.Handler.Warp as Warp
+import Network.Wai.Middleware.Gzip
 import Servant
 import Servant.Auth.Server as Server
 import Servant.Auth.Server.SetCookieOrphan ()
 import System.IO
+
+
+data State = State
+  { resources :: TVar [Resource]
+  , adminUsername :: Text
+  , adminPassword :: Text
+  }
+
+
+type AppM =
+  ReaderT State Handler
 
 
 type Api =
@@ -23,7 +37,7 @@ type Api =
 
 type Protected =
   "status" :> Get '[JSON] User :<|>
-  "resources" :> ReqBody '[JSON] Resource :> Post '[JSON] Resource
+  "resources" :> ReqBody '[JSON] Resource :> PostCreated '[JSON] Resource
 
 
 type Public =
@@ -39,12 +53,19 @@ type CredHeaders a =
 
 
 api :: Proxy Api
-api = Proxy
+api =
+  Proxy
+
+
+hoistContext :: Proxy '[CookieSettings, JWTSettings]
+hoistContext =
+  Proxy
 
 
 run :: IO ()
 run = do
   key <- generateKey
+  initData <- atomically $ newTVar []
   let jwtSettings =
         defaultJWTSettings key
       cookieSettings =
@@ -54,9 +75,12 @@ run = do
         }
       context =
          cookieSettings :. jwtSettings :. EmptyContext
+      state =
+        (flip runReaderT (State initData "admin" "admin"))
   Warp.runSettings settings .
     gzip def { gzipFiles = GzipCompress } .
     serveWithContext api context $
+    hoistServerWithContext api hoistContext state $
     server cookieSettings jwtSettings
 
 
@@ -68,13 +92,13 @@ settings =
   where port = 8080
 
 
-server :: CookieSettings -> JWTSettings -> Server Api
+server :: CookieSettings -> JWTSettings -> ServerT Api AppM
 server cookieSettings jwtSettings =
   protected :<|>
   public cookieSettings jwtSettings
 
 
-protected :: Server.AuthResult User -> Server Protected
+protected :: Server.AuthResult User -> ServerT Protected AppM
 protected authResult =
   case authResult of
     (Server.Authenticated user) ->
@@ -84,14 +108,14 @@ protected authResult =
       throwAll err401
 
 
-public :: CookieSettings -> JWTSettings -> Server Public
+public :: CookieSettings -> JWTSettings -> ServerT Public AppM
 public cookieSettings jwtSettings =
   logout cookieSettings :<|>
   checkCredentials cookieSettings jwtSettings :<|>
   Servant.serveDirectoryFileServer "./"
 
 
-logout :: CookieSettings -> Handler (CredHeaders NoContent)
+logout :: CookieSettings -> AppM (CredHeaders NoContent)
 logout cookieSettings =
   return $ clearSession cookieSettings NoContent
 
@@ -119,8 +143,8 @@ instance FromJWT User
 
 data Login =
   Login
-  { username :: String
-  , password :: String
+  { username :: Text
+  , password :: Text
   } deriving (Eq, Show, Read, Generic)
 
 
@@ -128,18 +152,27 @@ instance ToJSON Login
 instance FromJSON Login
 
 
-checkCredentials :: CookieSettings -> JWTSettings -> Login -> Handler (CredHeaders User)
-checkCredentials cookieSettings jwtSettings (Login "admin" "admin") = do
-   let usr =
-         User "Administrator" "hello@tokonoma.com"
-   maybeAddCookies <- liftIO $ acceptLogin cookieSettings jwtSettings usr
-   case maybeAddCookies of
+checkCredentials :: CookieSettings -> JWTSettings -> Login -> AppM (CredHeaders User)
+checkCredentials cookieSettings jwtSettings login = do
+   state <- ask
+   case validateLogin state login of
      Nothing ->
        throwError err401
-     Just addCookies ->
-       return $ addCookies usr
-checkCredentials _ _ _ =
-  throwError err401
+     Just user -> do
+       maybeAddCookies <- liftIO $ acceptLogin cookieSettings jwtSettings user
+       case maybeAddCookies of
+         Nothing ->
+           throwError err401
+         Just addCookies ->
+           return $ addCookies user
+
+
+validateLogin :: State -> Login -> Maybe User
+validateLogin state (Login u p ) =
+  if (u == adminUsername state) && (p == adminPassword state) then
+    Just $ User "Administrator" "hello@tokonoma.com"
+  else
+    Nothing
 
 
 -- RESOURCE

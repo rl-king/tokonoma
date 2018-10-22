@@ -24,7 +24,9 @@ dependencies:
   - servant-server
   - servant-auth
   - servant-auth-server
+  - stm
   - text
+  - transformers
   - wai
   - wai-extra
   - warp
