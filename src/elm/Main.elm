@@ -169,25 +169,46 @@ update msg model =
 view : Model -> Browser.Document Msg
 view model =
     { title = "Tokonoma"
-    , body = [ toUnstyled <| viewBody model ]
+    , body =
+        [ toUnstyled <|
+            main_ [ css styling.main ] [ global globalStyling, viewBody model ]
+        ]
     }
 
 
 viewBody : Model -> Html Msg
 viewBody model =
-    main_ [ css styling.main ]
-        [ global globalStyling
-        , text "Tokonoma"
-        , text (Debug.toString model.auth)
-        , Html.Styled.form [ onSubmit PerformLogin ]
+    case model.auth of
+        Loading ->
+            text ""
+
+        Anonymous ->
+            viewLogin
+
+        Auth user ->
+            viewAdmin model
+
+
+viewAdmin : Model -> Html Msg
+viewAdmin model =
+    section []
+        [ text (Debug.toString model.auth)
+        , h1 [] [ text "Tokonoma" ]
+        , button [ onClick Logout ] [ text "Logout" ]
+        , viewPost
+        ]
+
+
+viewLogin : Html Msg
+viewLogin =
+    section [ css styling.login ]
+        [ Html.Styled.form [ onSubmit PerformLogin ]
             [ label [] [ text "Username" ]
-            , input [ onInput OnUsernameInput ] []
+            , input [ onInput OnUsernameInput, autofocus True ] []
             , label [] [ text "Password" ]
             , input [ onInput OnPasswordInput ] []
             , button [] [ text "Login" ]
             ]
-        , button [ onClick Logout ] [ text "Logout" ]
-        , viewPost
         ]
 
 
@@ -206,19 +227,39 @@ viewPost =
 
 
 colors =
-    { lightGrey = hex "fafafa"
-    , grey = hex "eee"
-    , darkGrey = hex "5A6378"
+    { lightGrey = hex "f0f0f0"
+    , grey = hex "2f2f2f"
+    , darkGrey = hex "1f1f1f"
     , black = hex "111"
     , white = hex "fff"
-    , blue = hex "#005eff"
-    , red = hex "#ff3636"
+    , green = hex "43DCC1"
+    , red = hex "FD3740"
+    , yellow = hex "F1D027"
+    , blue = hex "3CA5EA"
+    , offwhite = hex "fafafa"
+    , purple = hex "7F63D2"
+    , pink = hex "f9b2e1"
     }
 
 
 styling =
     { main =
         [ Breakpoint.small []
+        ]
+    , login =
+        [ backgroundColor colors.white
+        , boxShadow4 (rem 0.5) (rem 0.5) zero colors.lightGrey
+        , padding (rem 1)
+        , width (rem 25)
+        , margin2 (vh 25) auto
+        , Global.descendants
+            [ Global.button
+                [ backgroundColor colors.green
+                , padding2 (rem 0.5) (rem 1)
+                , color colors.white
+                , width (pct 100)
+                ]
+            ]
         ]
     }
 
@@ -229,6 +270,7 @@ globalStyling =
     , Global.html
         [ margin zero
         , padding zero
+        , backgroundColor colors.offwhite
         ]
     , Global.body
         [ margin zero
@@ -248,6 +290,7 @@ globalStyling =
             , "sans-serif"
             ]
         ]
+    , Global.h1 [ margin2 (rem 0.25) zero ]
     , Global.ul
         [ listStyle none
         , padding zero
@@ -274,6 +317,30 @@ globalStyling =
         , width (pct 100)
         , margin2 (rem 1) zero
         , display none
+        ]
+    , Global.button
+        [ backgroundColor colors.lightGrey
+        , padding2 (rem 0.5) (rem 1.5)
+        , border zero
+        , fontWeight (int 500)
+        , fontSize (rem 1)
+        , cursor pointer
+        ]
+    , Global.label
+        [ display block
+        , marginBottom (rem 0.5)
+        , fontSize (rem 1)
+        , fontWeight (int 500)
+        ]
+    , Global.input
+        [ display block
+        , border zero
+        , height (rem 2.5)
+        , width (pct 100)
+        , marginBottom (rem 1.5)
+        , fontSize (rem 1)
+        , padding2 (rem 0) (rem 0.5)
+        , backgroundColor colors.lightGrey
         ]
     ]
 

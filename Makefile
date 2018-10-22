@@ -23,7 +23,8 @@ server:
 	@stack exec tokonoma
 
 watch-elm:
-	@find ./src/elm -name '*.elm' | entr make elm
+	@livereload ./ -e 'js' & \
+	find . -name '*.elm' | entr make elm
 
 watch:
 	@stack build --file-watch
