@@ -85,6 +85,8 @@ type Msg
     | OnPasswordInput String
     | PerformLogin
     | GotUser (Result Http.Error User)
+    | Logout
+    | GotLogout (Result Http.Error ())
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -124,6 +126,17 @@ update msg model =
         GotUser res ->
             ( { model | auth = Anonymous }, Cmd.none )
 
+        Logout ->
+            ( model
+            , Http.send GotLogout logout
+            )
+
+        GotLogout (Ok _) ->
+            ( { model | auth = Anonymous }, Cmd.none )
+
+        GotLogout (Err _) ->
+            ( model, Cmd.none )
+
 
 
 -- VIEW
@@ -149,6 +162,7 @@ viewBody model =
             , input [ onInput OnPasswordInput ] []
             , button [] [ text "Login" ]
             ]
+        , button [ onClick Logout ] [ text "Logout" ]
         ]
 
 
@@ -245,3 +259,20 @@ decodeUser =
     Decode.map2 User
         (Decode.field "name" Decode.string)
         (Decode.field "email" Decode.string)
+
+
+
+-- HTTP
+
+
+logout : Http.Request ()
+logout =
+    Http.request
+        { method = "POST"
+        , headers = []
+        , url = "/logout"
+        , body = Http.emptyBody
+        , expect = Http.expectStringResponse (\_ -> Ok ())
+        , timeout = Nothing
+        , withCredentials = False
+        }

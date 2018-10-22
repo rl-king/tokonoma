@@ -26,14 +26,15 @@ type Protected =
 
 
 type Public =
-  "login" :> ReqBody '[JSON] Login :> Post '[JSON] CredHeaders :<|>
+  "logout" :> Post '[JSON] (CredHeaders NoContent) :<|>
+  "login" :> ReqBody '[JSON] Login :> Post '[JSON] (CredHeaders User) :<|>
   Raw
 
 
-type CredHeaders =
+type CredHeaders a =
   Headers '[ Header "Set-Cookie" SetCookie
            , Header "Set-Cookie" SetCookie
-           ] User
+           ] a
 
 
 api :: Proxy Api
@@ -67,9 +68,9 @@ settings =
 
 
 server :: CookieSettings -> JWTSettings -> Server Api
-server cs jwts =
+server cookieSettings jwtSettings =
   protected :<|>
-  public cs jwts
+  public cookieSettings jwtSettings
 
 
 protected :: Server.AuthResult User -> Server Protected
@@ -82,9 +83,15 @@ protected authResult =
 
 
 public :: CookieSettings -> JWTSettings -> Server Public
-public cs jwts =
-  checkCredentials cs jwts :<|>
+public cookieSettings jwtSettings =
+  logout cookieSettings :<|>
+  checkCredentials cookieSettings jwtSettings :<|>
   Servant.serveDirectoryFileServer "./"
+
+
+logout :: CookieSettings -> Handler (CredHeaders NoContent)
+logout cookieSettings =
+  return $ clearSession cookieSettings NoContent
 
 
 -- USER
@@ -119,7 +126,7 @@ instance ToJSON Login
 instance FromJSON Login
 
 
-checkCredentials :: CookieSettings -> JWTSettings -> Login -> Handler CredHeaders
+checkCredentials :: CookieSettings -> JWTSettings -> Login -> Handler (CredHeaders User)
 checkCredentials cookieSettings jwtSettings (Login "admin" "admin") = do
    let usr =
          User "Administrator" "hello@tokonoma.com"
