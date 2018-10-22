@@ -8,23 +8,44 @@ import Control.Concurrent.STM.TVar (TVar, newTVar, readTVar, writeTVar)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.STM (atomically)
 import Control.Monad.Trans.Reader (ReaderT, ask, runReaderT)
-import Data.Aeson (FromJSON, ToJSON)
+import Data.Aeson (FromJSON, ToJSON, toEncoding, defaultOptions, encode, genericToEncoding)
 import Data.Text (Text)
+import Data.Time.Clock (UTCTime, getCurrentTime)
 import GHC.Generics (Generic)
 import qualified Network.Wai.Handler.Warp as Warp
+import Network.Wai (Middleware)
 import Network.Wai.Middleware.Gzip
+import Network.Wai.Middleware.RequestLogger
+import Network.Wai.Middleware.RequestLogger.JSON
 import Servant
 import Servant.Auth.Server as Server
-import Servant.Auth.Server.SetCookieOrphan ()
 import System.IO
+import qualified System.Log.FastLogger as Log
 
 
-data State = State
+
+data State =
+  State
   { resources :: TVar [Resource]
   , adminUsername :: Text
   , adminPassword :: Text
+  , logger :: Log.LoggerSet
   }
 
+data LogMessage =
+  LogMessage
+  { message :: !Text
+  , timestamp :: !UTCTime
+  } deriving (Eq, Show, Generic)
+
+
+instance FromJSON LogMessage
+instance ToJSON LogMessage
+  where toEncoding = genericToEncoding defaultOptions
+
+
+instance Log.ToLogStr LogMessage
+  where toLogStr = Log.toLogStr . encode
 
 type AppM =
   ReaderT State Handler
@@ -62,10 +83,24 @@ hoistContext =
   Proxy
 
 
+jsonRequestLogger :: IO Middleware
+jsonRequestLogger =
+  mkRequestLogger $
+  def { outputFormat = CustomOutputFormatWithDetails formatAsJSON }
+
 run :: IO ()
 run = do
   key <- generateKey
-  initData <- atomically $ newTVar []
+  initData <- atomically $
+    newTVar [Resource 1 "Hello", Resource 2 "World"]
+
+  warpLogger <- jsonRequestLogger
+  appLogger <- Log.newStdoutLoggerSet Log.defaultBufSize
+  currentTime <- getCurrentTime
+
+  let lgmsg = LogMessage "My app starting up!" currentTime
+  Log.pushLogStrLn appLogger (Log.toLogStr lgmsg) >> Log.flushLogStr appLogger
+
   let jwtSettings =
         defaultJWTSettings key
       cookieSettings =
@@ -76,9 +111,10 @@ run = do
       context =
          cookieSettings :. jwtSettings :. EmptyContext
       state =
-        (flip runReaderT (State initData "admin" "admin"))
+        (flip runReaderT (State initData "admin" "admin" appLogger))
   Warp.runSettings settings .
     gzip def { gzipFiles = GzipCompress } .
+    warpLogger $
     serveWithContext api context $
     hoistServerWithContext api hoistContext state $
     server cookieSettings jwtSettings
@@ -98,12 +134,15 @@ server cookieSettings jwtSettings =
   public cookieSettings jwtSettings
 
 
+-- ROUTES
+
+
 protected :: Server.AuthResult User -> ServerT Protected AppM
 protected authResult =
   case authResult of
     (Server.Authenticated user) ->
       return user :<|>
-      (\rsc -> return rsc)
+      return
     _ ->
       throwAll err401
 
@@ -111,7 +150,7 @@ protected authResult =
 public :: CookieSettings -> JWTSettings -> ServerT Public AppM
 public cookieSettings jwtSettings =
   logout cookieSettings :<|>
-  checkCredentials cookieSettings jwtSettings :<|>
+  login cookieSettings jwtSettings :<|>
   Servant.serveDirectoryFileServer "./"
 
 
@@ -152,8 +191,8 @@ instance ToJSON Login
 instance FromJSON Login
 
 
-checkCredentials :: CookieSettings -> JWTSettings -> Login -> AppM (CredHeaders User)
-checkCredentials cookieSettings jwtSettings login = do
+login :: CookieSettings -> JWTSettings -> Login -> AppM (CredHeaders User)
+login cookieSettings jwtSettings login = do
    state <- ask
    case validateLogin state login of
      Nothing ->

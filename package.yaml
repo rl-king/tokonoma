@@ -17,6 +17,7 @@ dependencies:
   - bytestring
   - containers
   - directory
+  - fast-logger
   - http-client
   - http-client-tls
   - mtl
@@ -26,6 +27,7 @@ dependencies:
   - servant-auth-server
   - stm
   - text
+  - time
   - transformers
   - wai
   - wai-extra
