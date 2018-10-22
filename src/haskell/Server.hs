@@ -7,9 +7,10 @@ module Server where
 import Control.Concurrent.STM.TVar (TVar, newTVar, readTVar, writeTVar)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.STM (atomically)
-import Control.Monad.Trans.Reader (ReaderT, ask, runReaderT)
+import Control.Monad.Trans.Reader (ReaderT, ask, asks, runReaderT)
 import Data.Aeson (FromJSON, ToJSON, toEncoding, defaultOptions, encode, genericToEncoding)
 import Data.Text (Text)
+import qualified Data.Text as Text
 import Data.Time.Clock (UTCTime, getCurrentTime)
 import GHC.Generics (Generic)
 import qualified Network.Wai.Handler.Warp as Warp
@@ -58,12 +59,13 @@ type Api =
 
 type Protected =
   "status" :> Get '[JSON] User :<|>
-  "resources" :> ReqBody '[JSON] Resource :> PostCreated '[JSON] Resource
+  "resources" :> ReqBody '[JSON] Resource :> PostCreated '[JSON] Resource :<|>
+  "resources" :> Get '[JSON] [Resource]
 
 
 type Public =
   "logout" :> Post '[JSON] (CredHeaders NoContent) :<|>
-  "login" :> ReqBody '[JSON] Login :> Post '[JSON] (CredHeaders User) :<|>
+  "login" :> ReqBody '[JSON] LoginCredentials :> Post '[JSON] (CredHeaders User) :<|>
   Raw
 
 
@@ -83,10 +85,11 @@ hoistContext =
   Proxy
 
 
-jsonRequestLogger :: IO Middleware
-jsonRequestLogger =
-  mkRequestLogger $
-  def { outputFormat = CustomOutputFormatWithDetails formatAsJSON }
+-- jsonRequestLogger :: IO Middleware
+-- jsonRequestLogger =
+--   mkRequestLogger $
+--   def { outputFormat = CustomOutputFormatWithDetails formatAsJSON }
+
 
 run :: IO ()
 run = do
@@ -94,12 +97,12 @@ run = do
   initData <- atomically $
     newTVar [Resource 1 "Hello", Resource 2 "World"]
 
-  warpLogger <- jsonRequestLogger
+  -- warpLogger <- jsonRequestLogger
   appLogger <- Log.newStdoutLoggerSet Log.defaultBufSize
   currentTime <- getCurrentTime
 
-  let lgmsg = LogMessage "My app starting up!" currentTime
-  Log.pushLogStrLn appLogger (Log.toLogStr lgmsg) >> Log.flushLogStr appLogger
+  let msg = LogMessage "Liftoff at " currentTime
+  Log.pushLogStrLn appLogger (Log.toLogStr msg) >> Log.flushLogStr appLogger
 
   let jwtSettings =
         defaultJWTSettings key
@@ -114,7 +117,7 @@ run = do
         (flip runReaderT (State initData "admin" "admin" appLogger))
   Warp.runSettings settings .
     gzip def { gzipFiles = GzipCompress } .
-    warpLogger $
+    -- warpLogger $
     serveWithContext api context $
     hoistServerWithContext api hoistContext state $
     server cookieSettings jwtSettings
@@ -142,9 +145,28 @@ protected authResult =
   case authResult of
     (Server.Authenticated user) ->
       return user :<|>
-      return
+      addResource :<|>
+      allResources
     _ ->
       throwAll err401
+
+
+addResource :: Resource -> AppM Resource
+addResource resource = do
+  logset <- asks logger
+  currentTime <- liftIO getCurrentTime
+  let msg = LogMessage (Text.pack $ "Added: " ++ (show resource)) currentTime
+  liftIO $ Log.pushLogStrLn logset $ Log.toLogStr msg
+  State{resources = rscs} <- ask
+  liftIO $ atomically $ readTVar rscs >>= writeTVar rscs . (resource :)
+  return resource
+
+
+allResources :: AppM [Resource]
+allResources = do
+  State{resources = rscs} <- ask
+  rscs_ <- liftIO $ atomically $ readTVar rscs
+  return rscs_
 
 
 public :: CookieSettings -> JWTSettings -> ServerT Public AppM
@@ -180,21 +202,21 @@ instance FromJWT User
 -- LOGIN
 
 
-data Login =
-  Login
+data LoginCredentials =
+  LoginCredentials
   { username :: Text
   , password :: Text
   } deriving (Eq, Show, Read, Generic)
 
 
-instance ToJSON Login
-instance FromJSON Login
+instance ToJSON LoginCredentials
+instance FromJSON LoginCredentials
 
 
-login :: CookieSettings -> JWTSettings -> Login -> AppM (CredHeaders User)
-login cookieSettings jwtSettings login = do
+login :: CookieSettings -> JWTSettings -> LoginCredentials -> AppM (CredHeaders User)
+login cookieSettings jwtSettings credentials = do
    state <- ask
-   case validateLogin state login of
+   case validateLogin state credentials of
      Nothing ->
        throwError err401
      Just user -> do
@@ -206,8 +228,8 @@ login cookieSettings jwtSettings login = do
            return $ addCookies user
 
 
-validateLogin :: State -> Login -> Maybe User
-validateLogin state (Login u p ) =
+validateLogin :: State -> LoginCredentials -> Maybe User
+validateLogin state (LoginCredentials u p ) =
   if (u == adminUsername state) && (p == adminPassword state) then
     Just $ User "Administrator" "hello@tokonoma.com"
   else

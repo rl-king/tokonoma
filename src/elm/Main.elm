@@ -11,6 +11,7 @@ import Html.Styled.Attributes
         ( attribute
         , autofocus
         , css
+        , disabled
         , href
         , placeholder
         , style
@@ -25,6 +26,7 @@ import Json.Decode as Decode
 import Json.Encode as Encode
 import Markdown
 import String.Interpolate exposing (interpolate)
+import Task exposing (Task)
 import Url exposing (Url)
 
 
@@ -54,6 +56,7 @@ type alias Model =
     , username : String
     , password : String
     , title : String
+    , resources : List Resource
     }
 
 
@@ -70,6 +73,7 @@ init _ location key =
       , username = ""
       , password = ""
       , title = ""
+      , resources = []
       }
     , Http.send GotUser <|
         Http.get "/status" decodeUser
@@ -92,6 +96,7 @@ type Msg
     | Logout
     | GotLogout (Result Http.Error ())
     | GotNewPost (Result Http.Error ())
+    | GotResources (Result Http.Error (List Resource))
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -137,12 +142,15 @@ update msg model =
                         ]
             in
             ( model
-            , Http.send GotNewPost <|
-                Http.post "/resources" (Http.jsonBody body) (Decode.succeed ())
+            , Task.attempt GotResources <|
+                Task.andThen (\_ -> getResources) <|
+                    postNewResource body
             )
 
         GotUser (Ok user) ->
-            ( { model | auth = Auth user }, Cmd.none )
+            ( { model | auth = Auth user }
+            , Task.attempt GotResources getResources
+            )
 
         GotUser res ->
             ( { model | auth = Anonymous }, Cmd.none )
@@ -159,6 +167,12 @@ update msg model =
             ( model, Cmd.none )
 
         GotNewPost _ ->
+            ( model, Cmd.none )
+
+        GotResources (Ok resources) ->
+            ( { model | resources = resources }, Cmd.none )
+
+        GotResources (Err _) ->
             ( model, Cmd.none )
 
 
@@ -183,7 +197,7 @@ viewBody model =
             text ""
 
         Anonymous ->
-            viewLogin
+            viewLogin model
 
         Auth user ->
             viewAdmin model
@@ -194,31 +208,105 @@ viewAdmin model =
     section []
         [ text (Debug.toString model.auth)
         , h1 [] [ text "Tokonoma" ]
-        , button [ onClick Logout ] [ text "Logout" ]
-        , viewPost
+        , button [ onClick Logout, css styling.logout ] [ text "Logout" ]
+        , viewNewResource
+        , viewResources model.resources
         ]
 
 
-viewLogin : Html Msg
-viewLogin =
+viewLogin : Model -> Html Msg
+viewLogin model =
+    let
+        disable =
+            String.isEmpty model.password
+                || String.isEmpty model.username
+    in
     section [ css styling.login ]
         [ Html.Styled.form [ onSubmit PerformLogin ]
             [ label [] [ text "Username" ]
             , input [ onInput OnUsernameInput, autofocus True ] []
             , label [] [ text "Password" ]
-            , input [ onInput OnPasswordInput ] []
-            , button [] [ text "Login" ]
+            , input [ onInput OnPasswordInput, type_ "password" ] []
+            , button [ disabled disable ] [ text "Login" ]
             ]
         ]
 
 
-viewPost : Html Msg
-viewPost =
+viewNewResource : Html Msg
+viewNewResource =
     Html.Styled.form [ onSubmit PerformPost ]
         [ label [] [ text "New Resource" ]
         , input [ onInput OnTitleInput ] []
         , button [] [ text "Post" ]
         ]
+
+
+viewResources resources =
+    ul [] <|
+        List.map (\{ title } -> li [] [ text title ]) resources
+
+
+
+-- HTTP
+
+
+getResources : Task Http.Error (List Resource)
+getResources =
+    Http.toTask <|
+        Http.get "/resources" (Decode.list decodeResource)
+
+
+postNewResource : Encode.Value -> Task Http.Error ()
+postNewResource body =
+    Http.toTask <|
+        Http.post "/resources" (Http.jsonBody body) (Decode.succeed ())
+
+
+
+-- DECODE
+
+
+type alias User =
+    { username : String
+    , email : String
+    }
+
+
+decodeUser : Decode.Decoder User
+decodeUser =
+    Decode.map2 User
+        (Decode.field "name" Decode.string)
+        (Decode.field "email" Decode.string)
+
+
+type alias Resource =
+    { id : Int
+    , title : String
+    }
+
+
+decodeResource : Decode.Decoder Resource
+decodeResource =
+    Decode.map2 Resource
+        (Decode.field "_id" Decode.int)
+        (Decode.field "_title" Decode.string)
+
+
+
+-- HTTP
+
+
+logout : Http.Request ()
+logout =
+    Http.request
+        { method = "POST"
+        , headers = []
+        , url = "/logout"
+        , body = Http.emptyBody
+        , expect = Http.expectStringResponse (\_ -> Ok ())
+        , timeout = Nothing
+        , withCredentials = False
+        }
 
 
 
@@ -229,6 +317,7 @@ viewPost =
 colors =
     { lightGrey = hex "f0f0f0"
     , grey = hex "2f2f2f"
+    , greyLighter = hex "3f3f3f"
     , darkGrey = hex "1f1f1f"
     , black = hex "111"
     , white = hex "fff"
@@ -254,12 +343,19 @@ styling =
         , margin2 (vh 25) auto
         , Global.descendants
             [ Global.button
-                [ backgroundColor colors.green
+                [ backgroundColor colors.grey
                 , padding2 (rem 0.5) (rem 1)
                 , color colors.white
                 , width (pct 100)
+                , Css.disabled
+                    [ color colors.greyLighter
+                    ]
                 ]
             ]
+        ]
+    , logout =
+        [ backgroundColor colors.red
+        , color colors.white
         ]
     }
 
@@ -343,37 +439,3 @@ globalStyling =
         , backgroundColor colors.lightGrey
         ]
     ]
-
-
-
--- DECODE
-
-
-type alias User =
-    { username : String
-    , email : String
-    }
-
-
-decodeUser : Decode.Decoder User
-decodeUser =
-    Decode.map2 User
-        (Decode.field "name" Decode.string)
-        (Decode.field "email" Decode.string)
-
-
-
--- HTTP
-
-
-logout : Http.Request ()
-logout =
-    Http.request
-        { method = "POST"
-        , headers = []
-        , url = "/logout"
-        , body = Http.emptyBody
-        , expect = Http.expectStringResponse (\_ -> Ok ())
-        , timeout = Nothing
-        , withCredentials = False
-        }
