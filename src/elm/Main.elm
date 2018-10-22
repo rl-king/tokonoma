@@ -53,6 +53,7 @@ type alias Model =
     , auth : Auth
     , username : String
     , password : String
+    , title : String
     }
 
 
@@ -68,6 +69,7 @@ init _ location key =
       , auth = Loading
       , username = ""
       , password = ""
+      , title = ""
       }
     , Http.send GotUser <|
         Http.get "/status" decodeUser
@@ -83,10 +85,13 @@ type Msg
     | OnUrlRequest Browser.UrlRequest
     | OnUsernameInput String
     | OnPasswordInput String
+    | OnTitleInput String
     | PerformLogin
+    | PerformPost
     | GotUser (Result Http.Error User)
     | Logout
     | GotLogout (Result Http.Error ())
+    | GotNewPost (Result Http.Error ())
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -107,6 +112,9 @@ update msg model =
         OnPasswordInput input ->
             ( { model | password = input }, Cmd.none )
 
+        OnTitleInput input ->
+            ( { model | title = input }, Cmd.none )
+
         PerformLogin ->
             let
                 body =
@@ -118,6 +126,19 @@ update msg model =
             ( model
             , Http.send GotUser <|
                 Http.post "/login" (Http.jsonBody body) decodeUser
+            )
+
+        PerformPost ->
+            let
+                body =
+                    Encode.object
+                        [ ( "_id", Encode.int 1 )
+                        , ( "_title", Encode.string model.title )
+                        ]
+            in
+            ( model
+            , Http.send GotNewPost <|
+                Http.post "/resources" (Http.jsonBody body) (Decode.succeed ())
             )
 
         GotUser (Ok user) ->
@@ -135,6 +156,9 @@ update msg model =
             ( { model | auth = Anonymous }, Cmd.none )
 
         GotLogout (Err _) ->
+            ( model, Cmd.none )
+
+        GotNewPost _ ->
             ( model, Cmd.none )
 
 
@@ -163,6 +187,16 @@ viewBody model =
             , button [] [ text "Login" ]
             ]
         , button [ onClick Logout ] [ text "Logout" ]
+        , viewPost
+        ]
+
+
+viewPost : Html Msg
+viewPost =
+    Html.Styled.form [ onSubmit PerformPost ]
+        [ label [] [ text "New Resource" ]
+        , input [ onInput OnTitleInput ] []
+        , button [] [ text "Post" ]
         ]
 
 

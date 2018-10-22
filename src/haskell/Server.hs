@@ -8,8 +8,8 @@ import qualified Network.Wai.Handler.Warp as Warp
 import Network.Wai.Middleware.Gzip
 import Control.Monad.Trans (liftIO)
 import Data.Aeson (FromJSON, ToJSON)
+import Data.Text (Text)
 import GHC.Generics (Generic)
-import qualified Data.ByteString.Lazy.Char8 as BS
 import Servant
 import Servant.Auth.Server as Server
 import Servant.Auth.Server.SetCookieOrphan ()
@@ -22,7 +22,8 @@ type Api =
 
 
 type Protected =
-  "status" :> Get '[JSON] User
+  "status" :> Get '[JSON] User :<|>
+  "resources" :> ReqBody '[JSON] Resource :> Post '[JSON] Resource
 
 
 type Public =
@@ -77,9 +78,10 @@ protected :: Server.AuthResult User -> Server Protected
 protected authResult =
   case authResult of
     (Server.Authenticated user) ->
-      return user
-    err ->
-      throwAll err401{ errBody = BS.pack $ show err }
+      return user :<|>
+      (\rsc -> return rsc)
+    _ ->
+      throwAll err401
 
 
 public :: CookieSettings -> JWTSettings -> Server Public
@@ -138,3 +140,17 @@ checkCredentials cookieSettings jwtSettings (Login "admin" "admin") = do
        return $ addCookies usr
 checkCredentials _ _ _ =
   throwError err401
+
+
+-- RESOURCE
+
+
+data Resource =
+  Resource
+  { _id :: Int
+  , _title :: Text
+  } deriving (Eq, Show, Read, Generic)
+
+
+instance ToJSON Resource
+instance FromJSON Resource
