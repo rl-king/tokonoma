@@ -178,43 +178,62 @@ view model =
     { title = "Tokonoma"
     , body =
         [ toUnstyled <|
-            main_ [ css styling.main ] [ global globalStyling, viewBody model ]
+            main_ [ css styling.main ] ([ global globalStyling ] ++ viewBody model)
         ]
     }
 
 
-viewBody : Model -> Html Msg
+viewBody : Model -> List (Html Msg)
 viewBody model =
     case model.auth of
         Loading ->
-            text ""
+            []
 
         Anonymous ->
             viewLogin model
 
         Auth user ->
-            viewAdmin model
+            viewAdmin user model
 
 
-viewAdmin : Model -> Html Msg
-viewAdmin model =
-    section []
-        [ text (Debug.toString model.auth)
-        , h1 [] [ text "Tokonoma" ]
-        , button [ onClick Logout, css styling.logout ] [ text "Logout" ]
-        , viewNewResource
+viewAdmin : User -> Model -> List (Html Msg)
+viewAdmin { username } model =
+    [ header [ css styling.header ]
+        [ h1 [] [ text "Tokonoma" ]
+        , section [ css styling.headerUser ]
+            [ h4 [] [ text username ]
+            , button [ onClick Logout, css styling.logout ] [ text "Logout" ]
+            ]
+        ]
+    , section [ css styling.content ]
+        [ viewNewResource
         , viewResources model.resources
+        ]
+    ]
+
+
+viewResources : List Resource -> Html Msg
+viewResources resources =
+    ul [] <|
+        List.map viewResource resources
+
+
+viewResource : Resource -> Html Msg
+viewResource { title, id } =
+    li [ css styling.resource ]
+        [ h2 [] [ text title ]
+        , span [] [ text (String.fromInt id) ]
         ]
 
 
-viewLogin : Model -> Html Msg
+viewLogin : Model -> List (Html Msg)
 viewLogin model =
     let
         disable =
             String.isEmpty model.password
                 || String.isEmpty model.username
     in
-    section [ css styling.login ]
+    [ section [ css styling.login ]
         [ Html.Styled.form [ onSubmit PerformLogin ]
             [ label [] [ text "Username" ]
             , input [ onInput OnUsernameInput, autofocus True ] []
@@ -223,30 +242,16 @@ viewLogin model =
             , button [ disabled disable ] [ text "Login" ]
             ]
         ]
+    ]
 
 
 viewNewResource : Html Msg
 viewNewResource =
-    Html.Styled.form [ onSubmit PerformPost ]
+    Html.Styled.form [ onSubmit PerformPost, css styling.newResource ]
         [ label [] [ text "New Resource" ]
-        , input [ onInput OnTitleInput ] []
-        , button [] [ text "Post" ]
+        , input [ onInput OnTitleInput, placeholder "Title" ] []
+        , button [] [ text "Save" ]
         ]
-
-
-viewResources resources =
-    ul [] <|
-        List.map (\{ title } -> li [] [ text title ]) resources
-
-
-
--- HTTP
-
-
-getResources : Task Http.Error (List Resource)
-getResources =
-    Http.toTask <|
-        Http.get "/resources" (Decode.list decodeResource)
 
 
 
@@ -281,6 +286,12 @@ decodeResource =
 
 
 -- HTTP
+
+
+getResources : Task Http.Error (List Resource)
+getResources =
+    Http.toTask <|
+        Http.get "/resources" (Decode.list decodeResource)
 
 
 postNewResource : Encode.Value -> Task Http.Error ()
@@ -336,9 +347,40 @@ styling =
     { main =
         [ Breakpoint.small []
         ]
+    , header =
+        [ color colors.white
+        , backgroundColor colors.black
+        , padding2 (rem 1) (rem 2)
+        , displayFlex
+        , justifyContent spaceBetween
+        , alignItems center
+        ]
+    , headerUser =
+        [ displayFlex
+        , justifyContent flexEnd
+        , alignItems center
+        , Global.descendants
+            [ Global.button
+                [ marginLeft (rem 1) ]
+            ]
+        ]
+    , content =
+        [ padding (rem 2)
+        ]
+    , resource =
+        [ padding (rem 1)
+        , backgroundColor colors.white
+        , marginTop (rem 0.5)
+        ]
+    , newResource =
+        [ padding (rem 1)
+        , backgroundColor colors.white
+        , marginTop (rem 0.5)
+        , boxShadow4 (rem 0.5) (rem 0.5) zero colors.lightGrey
+        , marginBottom (rem 2)
+        ]
     , login =
         [ backgroundColor colors.white
-        , boxShadow4 (rem 0.5) (rem 0.5) zero colors.lightGrey
         , padding (rem 1)
         , width (rem 25)
         , margin2 (vh 25) auto
@@ -355,8 +397,8 @@ styling =
             ]
         ]
     , logout =
-        [ backgroundColor colors.red
-        , color colors.white
+        [ backgroundColor colors.darkGrey
+        , color colors.red
         ]
     }
 
@@ -387,7 +429,19 @@ globalStyling =
             , "sans-serif"
             ]
         ]
-    , Global.h1 [ margin2 (rem 0.25) zero ]
+    , Global.h1
+        [ margin2 (rem 0.25) zero
+        , fontSize (rem 1.25)
+        , fontWeight (int 500)
+        ]
+    , Global.h2
+        [ margin2 (rem 0.25) zero
+        , fontWeight (int 500)
+        ]
+    , Global.h4
+        [ margin2 (rem 0.25) zero
+        , fontWeight (int 500)
+        ]
     , Global.ul
         [ listStyle none
         , padding zero
