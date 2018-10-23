@@ -10,6 +10,7 @@ import Control.Monad.STM (atomically)
 import Control.Monad.Trans.Reader (ReaderT, ask, asks, runReaderT)
 import Data.Aeson (FromJSON, ToJSON, toEncoding, defaultOptions, encode, genericToEncoding)
 import Data.Text (Text)
+import qualified Data.Text as Text
 import Data.Time.Clock (UTCTime, getCurrentTime)
 import GHC.Generics (Generic)
 import qualified Network.Wai.Handler.Warp as Warp
@@ -22,11 +23,13 @@ import Servant.Auth.Server as Server
 import System.IO
 import qualified System.Log.FastLogger as Log
 
+import qualified Database as DB
+import Database (Database, Resource(..))
 
 
 data State =
   State
-  { resources :: TVar [Resource]
+  { database :: TVar Database
   , adminUsername :: Text
   , adminPassword :: Text
   , logger :: Log.LoggerSet
@@ -59,7 +62,8 @@ type Api =
 type Protected =
   "status" :> Get '[JSON] User :<|>
   "resources" :> ReqBody '[JSON] Text :> PostCreated '[JSON] NoContent :<|>
-  "resources" :> Get '[JSON] [Resource]
+  "resources" :> Get '[JSON] [Resource] :<|>
+  "resources" :> Capture "resourceid" Int :> DeleteNoContent '[JSON] NoContent
 
 
 type Public =
@@ -93,8 +97,7 @@ hoistContext =
 run :: IO ()
 run = do
   key <- generateKey
-  initData <- atomically $
-    newTVar [Resource 1 "Hello", Resource 2 "World"]
+  initData <- atomically $ newTVar DB.init
 
   -- warpLogger <- jsonRequestLogger
   appLogger <- Log.newStdoutLoggerSet Log.defaultBufSize
@@ -145,7 +148,8 @@ protected authResult =
     (Server.Authenticated user) ->
       return user :<|>
       addResource :<|>
-      allResources
+      allResources :<|>
+      deleteResource
     _ ->
       throwAll err401
 
@@ -155,18 +159,31 @@ addResource title = do
   -- log
   logset <- asks logger
   currentTime <- liftIO getCurrentTime
-  let msg = LogMessage ("Added: " <> title) currentTime
+  let msg = LogMessage ("Adding: " <> title) currentTime
   liftIO $ Log.pushLogStrLn logset $ Log.toLogStr msg
   -- insert
-  State{resources = rscs} <- ask
-  liftIO $ atomically $ modifyTVar rscs (\xs -> Resource (length xs + 1) title : xs)
+  State{database = db} <- ask
+  liftIO $ atomically $ modifyTVar db (DB.insert title)
+  return NoContent
+
+
+deleteResource :: Int -> AppM NoContent
+deleteResource uid = do
+  -- log
+  logset <- asks logger
+  currentTime <- liftIO getCurrentTime
+  let msg = LogMessage ("Removing: " <> (Text.pack $ show uid)) currentTime
+  liftIO $ Log.pushLogStrLn logset $ Log.toLogStr msg
+  -- insert
+  State{database = db} <- ask
+  liftIO $ atomically $ modifyTVar db (DB.delete uid)
   return NoContent
 
 
 allResources :: AppM [Resource]
 allResources = do
-  State{resources = rscs} <- ask
-  liftIO $ atomically $ readTVar rscs
+  State{database = db} <- ask
+  liftIO $ fmap DB.all . atomically $ readTVar db
 
 
 public :: CookieSettings -> JWTSettings -> ServerT Public AppM
@@ -234,17 +251,3 @@ validateLogin state (LoginCredentials u p ) =
     Just $ User "Administrator" "hello@tokonoma.com"
   else
     Nothing
-
-
--- RESOURCE
-
-
-data Resource =
-  Resource
-  { _id :: Int
-  , _title :: Text
-  } deriving (Eq, Show, Read, Generic)
-
-
-instance ToJSON Resource
-instance FromJSON Resource

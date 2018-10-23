@@ -55,7 +55,7 @@ type alias Model =
     , auth : Auth
     , username : String
     , password : String
-    , title : String
+    , newResource : String
     , resources : List Resource
     }
 
@@ -72,7 +72,7 @@ init _ location key =
       , auth = Loading
       , username = ""
       , password = ""
-      , title = ""
+      , newResource = ""
       , resources = []
       }
     , Http.send GotUser <|
@@ -97,6 +97,8 @@ type Msg
     | GotLogout (Result Http.Error ())
     | GotNewPost (Result Http.Error ())
     | GotResources (Result Http.Error (List Resource))
+    | DeleteResource Int
+    | GotDeleteResource (Result Http.Error ())
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -118,7 +120,7 @@ update msg model =
             ( { model | password = input }, Cmd.none )
 
         OnTitleInput input ->
-            ( { model | title = input }, Cmd.none )
+            ( { model | newResource = input }, Cmd.none )
 
         PerformLogin ->
             let
@@ -137,7 +139,7 @@ update msg model =
             ( model
             , Task.attempt GotResources <|
                 Task.andThen (\_ -> getResources) <|
-                    postNewResource (Encode.string model.title)
+                    postNewResource (Encode.string model.newResource)
             )
 
         GotUser (Ok user) ->
@@ -166,6 +168,16 @@ update msg model =
             ( { model | resources = resources }, Cmd.none )
 
         GotResources (Err _) ->
+            ( model, Cmd.none )
+
+        DeleteResource id ->
+            ( model
+            , Task.attempt GotResources <|
+                Task.andThen (\_ -> getResources) <|
+                    deleteResource id
+            )
+
+        GotDeleteResource _ ->
             ( model, Cmd.none )
 
 
@@ -206,7 +218,7 @@ viewAdmin { username } model =
             ]
         ]
     , section [ css styling.content ]
-        [ viewNewResource
+        [ viewNewResource model.newResource
         , viewResources model.resources
         ]
     ]
@@ -214,15 +226,19 @@ viewAdmin { username } model =
 
 viewResources : List Resource -> Html Msg
 viewResources resources =
-    ul [] <|
-        List.map viewResource resources
+    section [] <|
+        List.map viewResource <|
+            List.sortBy (negate << .id) resources
 
 
 viewResource : Resource -> Html Msg
 viewResource { title, id } =
-    li [ css styling.resource ]
-        [ h2 [] [ text title ]
-        , span [] [ text (String.fromInt id) ]
+    div [ css styling.resource ]
+        [ section []
+            [ h2 [] [ text title ]
+            , span [] [ text "Id: ", text (String.fromInt id) ]
+            ]
+        , button [ onClick (DeleteResource id) ] [ text "delete" ]
         ]
 
 
@@ -245,12 +261,16 @@ viewLogin model =
     ]
 
 
-viewNewResource : Html Msg
-viewNewResource =
+viewNewResource : String -> Html Msg
+viewNewResource newResource =
+    let
+        disable =
+            String.isEmpty newResource
+    in
     Html.Styled.form [ onSubmit PerformPost, css styling.newResource ]
         [ label [] [ text "New Resource" ]
         , input [ onInput OnTitleInput, placeholder "Title" ] []
-        , button [] [ text "Save" ]
+        , button [ disabled disable ] [ text "Save" ]
         ]
 
 
@@ -302,6 +322,20 @@ postNewResource body =
             , headers = []
             , url = "/resources"
             , body = Http.jsonBody body
+            , expect = Http.expectStringResponse (\_ -> Ok ())
+            , timeout = Nothing
+            , withCredentials = False
+            }
+
+
+deleteResource : Int -> Task Http.Error ()
+deleteResource id =
+    Http.toTask <|
+        Http.request
+            { method = "DELETE"
+            , headers = []
+            , url = "/resources/" ++ String.fromInt id
+            , body = Http.emptyBody
             , expect = Http.expectStringResponse (\_ -> Ok ())
             , timeout = Nothing
             , withCredentials = False
@@ -371,6 +405,15 @@ styling =
         [ padding (rem 1)
         , backgroundColor colors.white
         , marginTop (rem 0.5)
+        , displayFlex
+        , justifyContent spaceBetween
+        , alignItems center
+        , Global.descendants
+            [ Global.button
+                [ color colors.red
+                , backgroundColor transparent
+                ]
+            ]
         ]
     , newResource =
         [ padding (rem 1)
@@ -378,6 +421,14 @@ styling =
         , marginTop (rem 0.5)
         , boxShadow4 (rem 0.5) (rem 0.5) zero colors.lightGrey
         , marginBottom (rem 2)
+        , Global.descendants
+            [ Global.button
+                [ Css.disabled
+                    [ color colors.greyLighter
+                    , cursor notAllowed
+                    ]
+                ]
+            ]
         ]
     , login =
         [ backgroundColor colors.white
@@ -392,6 +443,7 @@ styling =
                 , width (pct 100)
                 , Css.disabled
                     [ color colors.greyLighter
+                    , cursor notAllowed
                     ]
                 ]
             ]
