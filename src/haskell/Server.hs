@@ -10,7 +10,6 @@ import Control.Monad.STM (atomically)
 import Control.Monad.Trans.Reader (ReaderT, ask, asks, runReaderT)
 import Data.Aeson (FromJSON, ToJSON, toEncoding, defaultOptions, encode, genericToEncoding)
 import Data.Text (Text)
-import qualified Data.Text as Text
 import Data.Time.Clock (UTCTime, getCurrentTime)
 import GHC.Generics (Generic)
 import qualified Network.Wai.Handler.Warp as Warp
@@ -59,7 +58,7 @@ type Api =
 
 type Protected =
   "status" :> Get '[JSON] User :<|>
-  "resources" :> ReqBody '[JSON] Resource :> PostCreated '[JSON] Resource :<|>
+  "resources" :> ReqBody '[JSON] Text :> PostCreated '[JSON] NoContent :<|>
   "resources" :> Get '[JSON] [Resource]
 
 
@@ -151,15 +150,19 @@ protected authResult =
       throwAll err401
 
 
-addResource :: Resource -> AppM Resource
-addResource resource = do
+addResource :: Text -> AppM NoContent
+addResource title = do
+  -- log
   logset <- asks logger
   currentTime <- liftIO getCurrentTime
-  let msg = LogMessage (Text.pack $ "Added: " ++ (show resource)) currentTime
+  let msg = LogMessage ("Added: " <> title) currentTime
   liftIO $ Log.pushLogStrLn logset $ Log.toLogStr msg
+  -- insert
   State{resources = rscs} <- ask
-  liftIO $ atomically $ readTVar rscs >>= writeTVar rscs . (resource :)
-  return resource
+  liftIO $ atomically $
+    writeTVar rscs . (\xs -> Resource (length xs + 1) title : xs) =<<
+    readTVar rscs
+  return NoContent
 
 
 allResources :: AppM [Resource]
@@ -215,17 +218,17 @@ instance FromJSON LoginCredentials
 
 login :: CookieSettings -> JWTSettings -> LoginCredentials -> AppM (CredHeaders User)
 login cookieSettings jwtSettings credentials = do
-   state <- ask
-   case validateLogin state credentials of
-     Nothing ->
-       throwError err401
-     Just user -> do
-       maybeAddCookies <- liftIO $ acceptLogin cookieSettings jwtSettings user
-       case maybeAddCookies of
-         Nothing ->
-           throwError err401
-         Just addCookies ->
-           return $ addCookies user
+  state <- ask
+  case validateLogin state credentials of
+    Nothing ->
+      throwError err401
+    Just user -> do
+      maybeAddCookies <- liftIO $ acceptLogin cookieSettings jwtSettings user
+      case maybeAddCookies of
+        Nothing ->
+          throwError err401
+        Just addCookies ->
+          return $ addCookies user
 
 
 validateLogin :: State -> LoginCredentials -> Maybe User

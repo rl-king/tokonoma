@@ -134,17 +134,10 @@ update msg model =
             )
 
         PerformPost ->
-            let
-                body =
-                    Encode.object
-                        [ ( "_id", Encode.int 1 )
-                        , ( "_title", Encode.string model.title )
-                        ]
-            in
             ( model
             , Task.attempt GotResources <|
                 Task.andThen (\_ -> getResources) <|
-                    postNewResource body
+                    postNewResource (Encode.string model.title)
             )
 
         GotUser (Ok user) ->
@@ -256,12 +249,6 @@ getResources =
         Http.get "/resources" (Decode.list decodeResource)
 
 
-postNewResource : Encode.Value -> Task Http.Error ()
-postNewResource body =
-    Http.toTask <|
-        Http.post "/resources" (Http.jsonBody body) (Decode.succeed ())
-
-
 
 -- DECODE
 
@@ -294,6 +281,20 @@ decodeResource =
 
 
 -- HTTP
+
+
+postNewResource : Encode.Value -> Task Http.Error ()
+postNewResource body =
+    Http.toTask <|
+        Http.request
+            { method = "POST"
+            , headers = []
+            , url = "/resources"
+            , body = Http.jsonBody body
+            , expect = Http.expectStringResponse (\_ -> Ok ())
+            , timeout = Nothing
+            , withCredentials = False
+            }
 
 
 logout : Http.Request ()
