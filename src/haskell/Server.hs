@@ -4,7 +4,7 @@
 {-# LANGUAGE TypeOperators #-}
 module Server where
 
-import Control.Concurrent.STM.TVar (TVar, newTVar, readTVar, writeTVar)
+import Control.Concurrent.STM.TVar (TVar, newTVar, readTVar, writeTVar, modifyTVar)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.STM (atomically)
 import Control.Monad.Trans.Reader (ReaderT, ask, asks, runReaderT)
@@ -113,7 +113,7 @@ run = do
       context =
          cookieSettings :. jwtSettings :. EmptyContext
       state =
-        (flip runReaderT (State initData "admin" "admin" appLogger))
+        flip runReaderT (State initData "admin" "admin" appLogger)
   Warp.runSettings settings .
     gzip def { gzipFiles = GzipCompress } .
     -- warpLogger $
@@ -125,7 +125,7 @@ run = do
 settings :: Warp.Settings
 settings =
   Warp.setPort port $
-  Warp.setBeforeMainLoop (hPutStrLn stderr ("listening on port " ++ show port)) $
+  Warp.setBeforeMainLoop (hPutStrLn stderr ("listening on port " ++ show port))
   Warp.defaultSettings
   where port = 8080
 
@@ -159,17 +159,14 @@ addResource title = do
   liftIO $ Log.pushLogStrLn logset $ Log.toLogStr msg
   -- insert
   State{resources = rscs} <- ask
-  liftIO $ atomically $
-    writeTVar rscs . (\xs -> Resource (length xs + 1) title : xs) =<<
-    readTVar rscs
+  liftIO $ atomically $ modifyTVar rscs (\xs -> Resource (length xs + 1) title : xs)
   return NoContent
 
 
 allResources :: AppM [Resource]
 allResources = do
   State{resources = rscs} <- ask
-  rscs_ <- liftIO $ atomically $ readTVar rscs
-  return rscs_
+  liftIO $ atomically $ readTVar rscs
 
 
 public :: CookieSettings -> JWTSettings -> ServerT Public AppM
