@@ -19,14 +19,14 @@ type Database =
 init :: Database
 init =
   Map.fromList
-  [ (1, Resource 1 "Hello")
-  , (2, Resource 2 "World")
+  [ (1, Resource 1 "Hello world" True 1540357150428)
+  , (2, Resource 2 "Foo bar" True 1540357150428)
   ]
 
 
-insert :: Text -> Database -> Database
-insert title db =
-  Map.insert uid (Resource uid title) db
+insert :: Text -> Int -> Database -> Database
+insert title now db =
+  Map.insert uid (Resource uid title True now) db
   where uid = (+1) . maximum $ Map.keys db
 
 
@@ -47,6 +47,8 @@ data Resource =
   Resource
   { _id :: Int
   , _title :: Text
+  , _published :: Bool
+  , _created :: Int -- Posix time
   } deriving (Eq, Show, Read, Generic)
 
 

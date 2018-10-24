@@ -25,8 +25,10 @@ import Http
 import Json.Decode as Decode
 import Json.Encode as Encode
 import Markdown
+import Set exposing (Set)
 import String.Interpolate exposing (interpolate)
 import Task exposing (Task)
+import Time
 import Url exposing (Url)
 
 
@@ -75,7 +77,7 @@ init _ location key =
       , newResource = ""
       , resources = []
       }
-    , Http.send GotUser <|
+    , Http.send (Response << Auth_) <|
         Http.get "/status" decodeUser
     )
 
@@ -91,14 +93,18 @@ type Msg
     | OnPasswordInput String
     | OnTitleInput String
     | PerformLogin
-    | PerformPost
-    | GotUser (Result Http.Error User)
-    | Logout
-    | GotLogout (Result Http.Error ())
-    | GotNewPost (Result Http.Error ())
-    | GotResources (Result Http.Error (List Resource))
+    | SaveNewResource
+    | PerformLogout
     | DeleteResource Int
-    | GotDeleteResource (Result Http.Error ())
+    | Response RequestResult
+
+
+type RequestResult
+    = Auth_ (Result Http.Error User)
+    | Logout (Result Http.Error ())
+    | PostResource (Result Http.Error ())
+    | DeleteResource_ (Result Http.Error ())
+    | AllResources (Result Http.Error (List Resource))
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -123,61 +129,53 @@ update msg model =
             ( { model | newResource = input }, Cmd.none )
 
         PerformLogin ->
-            let
-                body =
-                    Encode.object
-                        [ ( "username", Encode.string model.username )
-                        , ( "password", Encode.string model.password )
-                        ]
-            in
             ( model
-            , Http.send GotUser <|
-                Http.post "/login" (Http.jsonBody body) decodeUser
+            , postLogin model.username model.password
             )
 
-        PerformPost ->
-            ( model
-            , Task.attempt GotResources <|
+        SaveNewResource ->
+            ( { model | newResource = "" }
+            , Task.attempt (Response << AllResources) <|
                 Task.andThen (\_ -> getResources) <|
                     postNewResource (Encode.string model.newResource)
             )
 
-        GotUser (Ok user) ->
-            ( { model | auth = Auth user }
-            , Task.attempt GotResources getResources
-            )
-
-        GotUser res ->
-            ( { model | auth = Anonymous }, Cmd.none )
-
-        Logout ->
+        PerformLogout ->
             ( model
-            , Http.send GotLogout logout
+            , Http.send (Response << Logout) logout
             )
-
-        GotLogout (Ok _) ->
-            ( { model | auth = Anonymous }, Cmd.none )
-
-        GotLogout (Err _) ->
-            ( model, Cmd.none )
-
-        GotNewPost _ ->
-            ( model, Cmd.none )
-
-        GotResources (Ok resources) ->
-            ( { model | resources = resources }, Cmd.none )
-
-        GotResources (Err _) ->
-            ( model, Cmd.none )
 
         DeleteResource id ->
             ( model
-            , Task.attempt GotResources <|
+            , Task.attempt (Response << AllResources) <|
                 Task.andThen (\_ -> getResources) <|
                     deleteResource id
             )
 
-        GotDeleteResource _ ->
+        Response (Auth_ (Ok user)) ->
+            ( { model | auth = Auth user }
+            , Task.attempt (Response << AllResources) getResources
+            )
+
+        Response (Auth_ (Err err)) ->
+            ( { model | auth = Anonymous }, Cmd.none )
+
+        Response (Logout (Ok _)) ->
+            ( { model | auth = Anonymous }, Cmd.none )
+
+        Response (Logout (Err _)) ->
+            ( model, Cmd.none )
+
+        Response (PostResource _) ->
+            ( model, Cmd.none )
+
+        Response (AllResources (Ok resources)) ->
+            ( { model | resources = resources }, Cmd.none )
+
+        Response (AllResources (Err err)) ->
+            ( model, Cmd.none )
+
+        Response (DeleteResource_ _) ->
             ( model, Cmd.none )
 
 
@@ -214,7 +212,7 @@ viewAdmin { username } model =
         [ h1 [] [ text "Tokonoma" ]
         , section [ css styling.headerUser ]
             [ h4 [] [ text username ]
-            , button [ onClick Logout, css styling.logout ] [ text "Logout" ]
+            , button [ onClick PerformLogout, css styling.logout ] [ text "Logout" ]
             ]
         ]
     , section [ css styling.content ]
@@ -232,11 +230,16 @@ viewResources resources =
 
 
 viewResource : Resource -> Html Msg
-viewResource { title, id } =
+viewResource { title, id, created } =
     div [ css styling.resource ]
         [ section []
             [ h2 [] [ text title ]
             , span [] [ text "Id: ", text (String.fromInt id) ]
+            , text " | "
+            , time []
+                [ text "Created: "
+                , text (String.fromInt (Time.posixToMillis created))
+                ]
             ]
         , button [ onClick (DeleteResource id) ] [ text "delete" ]
         ]
@@ -267,9 +270,14 @@ viewNewResource newResource =
         disable =
             String.isEmpty newResource
     in
-    Html.Styled.form [ onSubmit PerformPost, css styling.newResource ]
+    Html.Styled.form [ onSubmit SaveNewResource, css styling.newResource ]
         [ label [] [ text "New Resource" ]
-        , input [ onInput OnTitleInput, placeholder "Title" ] []
+        , input
+            [ onInput OnTitleInput
+            , placeholder "Title"
+            , value newResource
+            ]
+            []
         , button [ disabled disable ] [ text "Save" ]
         ]
 
@@ -294,14 +302,24 @@ decodeUser =
 type alias Resource =
     { id : Int
     , title : String
+    , published : Bool
+    , created : Time.Posix
     }
 
 
 decodeResource : Decode.Decoder Resource
 decodeResource =
-    Decode.map2 Resource
+    Decode.map4 Resource
         (Decode.field "_id" Decode.int)
         (Decode.field "_title" Decode.string)
+        (Decode.field "_published" Decode.bool)
+        (Decode.field "_created" decodePosix)
+
+
+decodePosix : Decode.Decoder Time.Posix
+decodePosix =
+    Decode.int
+        |> Decode.map Time.millisToPosix
 
 
 
@@ -312,6 +330,19 @@ getResources : Task Http.Error (List Resource)
 getResources =
     Http.toTask <|
         Http.get "/resources" (Decode.list decodeResource)
+
+
+postLogin : String -> String -> Cmd Msg
+postLogin username password =
+    let
+        body =
+            Encode.object
+                [ ( "username", Encode.string username )
+                , ( "password", Encode.string password )
+                ]
+    in
+    Http.send (Response << Auth_) <|
+        Http.post "/login" (Http.jsonBody body) decodeUser
 
 
 postNewResource : Encode.Value -> Task Http.Error ()

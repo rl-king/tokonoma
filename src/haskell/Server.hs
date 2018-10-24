@@ -12,6 +12,7 @@ import Data.Aeson (FromJSON, ToJSON, toEncoding, defaultOptions, encode, generic
 import Data.Text (Text)
 import qualified Data.Text as Text
 import Data.Time.Clock (UTCTime, getCurrentTime)
+import Data.Time.Clock.POSIX (getPOSIXTime)
 import GHC.Generics (Generic)
 import qualified Network.Wai.Handler.Warp as Warp
 import Network.Wai (Middleware)
@@ -159,11 +160,12 @@ addResource title = do
   -- log
   logset <- asks logger
   currentTime <- liftIO getCurrentTime
+  posix <- liftIO $ fromInteger . round <$> getPOSIXTime
   let msg = LogMessage ("Adding: " <> title) currentTime
   liftIO $ Log.pushLogStrLn logset $ Log.toLogStr msg
   -- insert
   State{database = db} <- ask
-  liftIO $ atomically $ modifyTVar db (DB.insert title)
+  liftIO $ atomically $ modifyTVar db (DB.insert title posix)
   return NoContent
 
 
