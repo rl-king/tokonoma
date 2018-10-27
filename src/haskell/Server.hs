@@ -5,6 +5,7 @@
 module Server where
 
 import Control.Concurrent.STM.TVar (TVar, newTVar, readTVar, writeTVar, modifyTVar)
+import Control.Monad (forM_)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.STM (atomically)
 import Control.Monad.Trans.Reader (ReaderT, ask, asks, runReaderT)
@@ -38,6 +39,7 @@ data State =
   , logger :: Log.LoggerSet
   }
 
+
 data LogMessage =
   LogMessage
   { message :: !Text
@@ -68,13 +70,7 @@ type Protected =
   "resources" :> ReqBody '[JSON] DB.NewResource :> PostCreated '[JSON] NoContent :<|>
   "resources" :> Get '[JSON] [Resource] :<|>
   "resources" :> Capture "resourceid" Int :> DeleteNoContent '[JSON] NoContent :<|>
-  "file" :> MultipartForm Mem (MultipartData Mem) :> Post '[JSON] Text
-
-
--- instance FromMultipart Tmp NewFile where
---   fromMultipart multipartData =
---     NewFile <$> lookupInput "filename" multipartData
---     <*> fmap fdPayload (lookupFile "content" multipartData)
+  "file" :> MultipartForm Mem (MultipartData Mem) :> Post '[JSON] [Text]
 
 
 type Public =
@@ -211,18 +207,20 @@ logout cookieSettings =
   return $ clearSession cookieSettings NoContent
 
 
-fileUpload :: MultipartData Mem -> AppM Text
+fileUpload :: MultipartData Mem -> AppM [Text]
 fileUpload multipartData = do
   -- log
   logset <- asks logger
   currentTime <- liftIO getCurrentTime
   posix <- liftIO $ fromInteger . round <$> getPOSIXTime
-  let msg = LogMessage ("Adding: " <> fdFileName file) currentTime
+  let
+    msg = LogMessage ("Adding: " <> Text.pack (show files')) currentTime
   liftIO $ Log.pushLogStrLn logset $ Log.toLogStr msg
-  -- -- insert
-  liftIO $ LBS.writeFile "files/foo.png" (fdPayload file)
-  return $ Text.pack (show $ fdFileName file)
-    where (file:_) = files multipartData
+  -- write to disk
+  liftIO $ forM_ files'
+    (\file -> LBS.writeFile ("files/" ++ Text.unpack (fdFileName file)) (fdPayload file))
+  return $ fmap (\f -> Text.pack ("/files/" ++ Text.unpack (fdFileName f))) files'
+    where files' = files multipartData
 
 
 -- USER

@@ -5,7 +5,8 @@ import Browser.Navigation as Navigation
 import Css exposing (..)
 import Css.Breakpoint as Breakpoint
 import Css.Global as Global exposing (global)
-import Data.Request as Request exposing (File)
+import Data.File as File exposing (File)
+import Data.Request as Request
 import Data.Resource as Resource exposing (Resource)
 import Data.User as User exposing (User)
 import Html.Styled exposing (..)
@@ -18,6 +19,7 @@ import Html.Styled.Attributes
         , href
         , id
         , placeholder
+        , src
         , style
         , target
         , type_
@@ -43,7 +45,7 @@ import Url exposing (Url)
 port onSelectFile : String -> Cmd msg
 
 
-port onFileRead : (String -> msg) -> Sub msg
+port onFileUpload : (Decode.Value -> msg) -> Sub msg
 
 
 
@@ -56,11 +58,19 @@ main =
         { init = init
         , view = view
         , update = update
-        , subscriptions =
-            \_ -> onFileRead (Response << FileUpload << Result.Ok)
+        , subscriptions = subscriptions
         , onUrlChange = OnUrlChange
         , onUrlRequest = OnUrlRequest
         }
+
+
+subscriptions : Model -> Sub Msg
+subscriptions model =
+    onFileUpload
+        (Response
+            << FileUpload
+            << File.decodeFileUpload
+        )
 
 
 
@@ -131,7 +141,7 @@ type RequestResult
     | PostResource (Result Http.Error ())
     | DeleteResource_ (Result Http.Error ())
     | AllResources (Result Http.Error (List Resource))
-    | FileUpload (Result Http.Error String)
+    | FileUpload (Result Decode.Error (List File))
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -215,12 +225,19 @@ update msg model =
         Response (DeleteResource_ _) ->
             ( model, Cmd.none )
 
-        Response (FileUpload err) ->
+        Response (FileUpload (Ok files)) ->
+            ( { model | newResourceFiles = files ++ model.newResourceFiles }
+            , Cmd.none
+            )
+
+        Response (FileUpload (Err err)) ->
             let
                 _ =
-                    Debug.log "err" err
+                    Debug.log "File upload error" err
             in
-            ( model, Cmd.none )
+            ( model
+            , Cmd.none
+            )
 
 
 
@@ -260,7 +277,10 @@ viewAdmin { username } model =
             ]
         ]
     , section [ css styling.content ]
-        [ viewNewResource model.newResourceTitle model.newResourceBody
+        [ viewNewResource
+            model.newResourceTitle
+            model.newResourceBody
+            model.newResourceFiles
         , viewResources model.resources
         ]
     ]
@@ -317,8 +337,8 @@ viewLogin model =
     ]
 
 
-viewNewResource : String -> String -> Html Msg
-viewNewResource title body =
+viewNewResource : String -> String -> List File -> Html Msg
+viewNewResource title body files =
     let
         disable =
             String.isEmpty title || String.isEmpty body
@@ -343,6 +363,7 @@ viewNewResource title body =
                 Decode.succeed (OnSelectFile "file-input")
             ]
             []
+        , div [] (List.map (\{ filename } -> img [ src filename ] []) files)
         , button [ disabled disable ] [ text "Save" ]
         ]
 
@@ -510,10 +531,9 @@ globalStyling =
         , hover [ textDecoration underline ]
         ]
     , Global.img
-        [ maxWidth (rem 5)
+        [ maxWidth (rem 10)
         , width (pct 100)
         , margin2 (rem 1) zero
-        , display none
         ]
     , Global.button
         [ backgroundColor colors.lightGrey

@@ -1,6 +1,5 @@
 module Data.Request exposing
-    ( File
-    , deleteResource
+    ( deleteResource
     , getResources
     , getStatus
     , postFiles
@@ -9,6 +8,7 @@ module Data.Request exposing
     , postNewResource
     )
 
+import Data.File as File exposing (File)
 import Data.Resource as Resource exposing (Resource)
 import Data.User as User exposing (User)
 import Http
@@ -16,16 +16,6 @@ import Json.Decode as Decode
 import Json.Encode as Encode
 import Task exposing (Task)
 import Time
-
-
-
--- FILE
-
-
-type alias File =
-    { contents : String
-    , filename : String
-    }
 
 
 
@@ -85,9 +75,9 @@ postNewResource title body files =
 postFiles : List File -> Task Http.Error ()
 postFiles files =
     let
-        json { contents, filename } =
+        json { path, filename } =
             Encode.object
-                [ ( "_ncontent", Encode.string contents )
+                [ ( "_npath", Encode.string path )
                 , ( "_nfilename", Encode.string filename )
                 ]
     in
