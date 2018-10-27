@@ -18,6 +18,7 @@ import Data.Time.Clock.POSIX (getPOSIXTime)
 import GHC.Generics (Generic)
 import qualified Network.Wai.Handler.Warp as Warp
 import Network.Wai (Middleware)
+-- import Network.Wai.Application.Static
 import Network.Wai.Middleware.Gzip
 import Network.Wai.Middleware.RequestLogger
 import Network.Wai.Middleware.RequestLogger.JSON
@@ -181,7 +182,7 @@ deleteResource uid = do
   -- log
   logset <- asks logger
   currentTime <- liftIO getCurrentTime
-  let msg = LogMessage ("Removing: " <> (Text.pack $ show uid)) currentTime
+  let msg = LogMessage ("Removing: " <> Text.pack (show uid)) currentTime
   liftIO $ Log.pushLogStrLn logset $ Log.toLogStr msg
   -- delete
   State{database = db} <- ask
@@ -199,7 +200,7 @@ public :: CookieSettings -> JWTSettings -> ServerT Public AppM
 public cookieSettings jwtSettings =
   logout cookieSettings :<|>
   login cookieSettings jwtSettings :<|>
-  Servant.serveDirectoryFileServer "./"
+  Servant.serveDirectory "./static"
 
 
 logout :: CookieSettings -> AppM (CredHeaders NoContent)

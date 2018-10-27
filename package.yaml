@@ -31,7 +31,9 @@ dependencies:
   - time
   - transformers
   - wai
+  - wai-app-static
   - wai-extra
+  - wai-cors
   - warp
 
 library:

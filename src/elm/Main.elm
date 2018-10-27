@@ -5,44 +5,40 @@ import Browser.Navigation as Navigation
 import Css exposing (..)
 import Css.Breakpoint as Breakpoint
 import Css.Global as Global exposing (global)
+import Data.Auth as Auth exposing (Auth)
 import Data.File as File exposing (File)
 import Data.Request as Request
 import Data.Resource as Resource exposing (Resource)
+import Data.Session as Session
+import Data.Update as Update
 import Data.User as User exposing (User)
 import Html.Styled exposing (..)
-import Html.Styled.Attributes
-    exposing
-        ( attribute
-        , autofocus
-        , css
-        , disabled
-        , href
-        , id
-        , placeholder
-        , src
-        , style
-        , target
-        , type_
-        , value
-        )
+import Html.Styled.Attributes exposing (css)
 import Html.Styled.Events exposing (on, onClick, onInput, onSubmit)
 import Html.Styled.Keyed as Keyed
 import Http
 import Json.Decode as Decode
 import Json.Encode as Encode
-import Markdown
+import Page.Edit
+import Page.Login
+import Page.Resources
 import Set exposing (Set)
+import Specification exposing (colors)
 import String.Interpolate exposing (interpolate)
 import Task exposing (Task)
-import Time
 import Url exposing (Url)
+import Url.Builder as Builder
+import Url.Parser as Parser
+    exposing
+        ( (</>)
+        , (<?>)
+        , Parser
+        )
+import Url.Parser.Query as Query
 
 
 
 -- PORTS
-
-
-port onSelectFile : String -> Cmd msg
 
 
 port onFileUpload : (Decode.Value -> msg) -> Sub msg
@@ -66,54 +62,38 @@ main =
 
 subscriptions : Model -> Sub Msg
 subscriptions model =
-    onFileUpload
-        (Response
-            << FileUpload
-            << File.decodeFileUpload
-        )
+    Sub.none
 
 
 
+-- onFileUpload
+--     (Response
+--         << FileUpload
+--         << File.decodeFileUpload
+--     )
 -- MODEL
 
 
 type alias Model =
-    { key : Navigation.Key
-    , auth : Auth
-    , username : String
-    , password : String
-    , newResourceTitle : String
-    , newResourceBody : String
-    , newResourceFiles : List File
-    , resources : List Resource
+    { session : Session.Data
+    , page : Page
     }
 
 
-type Auth
-    = Auth User
-    | Anonymous
+type Page
+    = Resources Page.Resources.Model
+    | Edit Page.Edit.Model
+    | Login Page.Login.Model
     | Loading
-
-
-type View
-    = Resources (List Resource)
-    | Files (List File)
+    | NotFound
 
 
 init : flags -> Url -> Navigation.Key -> ( Model, Cmd Msg )
-init _ location key =
-    ( { key = key
-      , auth = Loading
-      , username = ""
-      , password = ""
-      , newResourceTitle = ""
-      , newResourceBody = ""
-      , newResourceFiles = []
-      , resources = []
-      }
-    , Task.attempt (Response << Auth_)
-        Request.getStatus
-    )
+init _ url key =
+    onNavigation url { session = Session.init key, page = Loading }
+        |> (\( model, cmds ) ->
+                ( model, Cmd.batch [ Task.attempt GotStatus Request.getStatus, cmds ] )
+           )
 
 
 
@@ -123,119 +103,57 @@ init _ location key =
 type Msg
     = OnUrlChange Url
     | OnUrlRequest Browser.UrlRequest
-    | OnUsernameInput String
-    | OnPasswordInput String
-    | OnTitleInput String
-    | OnBodyInput String
-    | PerformLogin
-    | SaveNewResource
+    | LoginMsg Page.Login.Msg
+    | ResourcesMsg Page.Resources.Msg
     | PerformLogout
-    | DeleteResource Int
-    | OnSelectFile String
-    | Response RequestResult
-
-
-type RequestResult
-    = Auth_ (Result Http.Error User)
-    | Logout (Result Http.Error ())
-    | PostResource (Result Http.Error ())
-    | DeleteResource_ (Result Http.Error ())
-    | AllResources (Result Http.Error (List Resource))
-    | FileUpload (Result Decode.Error (List File))
+    | GotStatus (Result Http.Error User)
+    | GotLogout (Result Http.Error ())
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
-update msg model =
+update msg ({ session } as model) =
     case msg of
         OnUrlChange location ->
             ( model, Cmd.none )
 
         OnUrlRequest (Browser.Internal url) ->
-            ( model, Navigation.pushUrl model.key (Url.toString url) )
+            ( model, Navigation.pushUrl (Session.navKey session) (Url.toString url) )
 
         OnUrlRequest (Browser.External href) ->
             ( model, Navigation.load href )
 
-        OnUsernameInput input ->
-            ( { model | username = input }, Cmd.none )
+        LoginMsg loginMsg ->
+            case model.page of
+                Login loginModel ->
+                    step model Login LoginMsg (Page.Login.update loginMsg loginModel)
 
-        OnPasswordInput input ->
-            ( { model | password = input }, Cmd.none )
+                _ ->
+                    ( model, Cmd.none )
 
-        OnTitleInput input ->
-            ( { model | newResourceTitle = input }, Cmd.none )
+        ResourcesMsg resourcesMsg ->
+            case model.page of
+                Resources resourcesModel ->
+                    step model Resources ResourcesMsg <|
+                        Page.Resources.update resourcesMsg resourcesModel
 
-        OnBodyInput input ->
-            ( { model | newResourceBody = input }, Cmd.none )
-
-        PerformLogin ->
-            ( model
-            , Task.attempt (Response << Auth_) <|
-                Request.postLogin model.username model.password
-            )
-
-        SaveNewResource ->
-            ( { model | newResourceTitle = "", newResourceBody = "" }
-            , Task.attempt (Response << AllResources) <|
-                Task.andThen (\_ -> Request.getResources) <|
-                    Request.postNewResource
-                        model.newResourceTitle
-                        model.newResourceBody
-                        model.newResourceFiles
-            )
+                _ ->
+                    ( model, Cmd.none )
 
         PerformLogout ->
             ( model
-            , Task.attempt (Response << Logout) Request.postLogout
+            , Task.attempt GotLogout Request.postLogout
             )
 
-        DeleteResource id ->
+        GotLogout result ->
             ( model
-            , Task.attempt (Response << AllResources) <|
-                Task.andThen (\_ -> Request.getResources) <|
-                    Request.deleteResource id
-            )
-
-        OnSelectFile id ->
-            ( model, onSelectFile id )
-
-        Response (Auth_ (Ok user)) ->
-            ( { model | auth = Auth user }
-            , Task.attempt (Response << AllResources) Request.getResources
-            )
-
-        Response (Auth_ (Err err)) ->
-            ( { model | auth = Anonymous }, Cmd.none )
-
-        Response (Logout (Ok _)) ->
-            ( { model | auth = Anonymous }, Cmd.none )
-
-        Response (Logout (Err _)) ->
-            ( model, Cmd.none )
-
-        Response (PostResource _) ->
-            ( model, Cmd.none )
-
-        Response (AllResources (Ok resources)) ->
-            ( { model | resources = resources }, Cmd.none )
-
-        Response (AllResources (Err err)) ->
-            ( model, Cmd.none )
-
-        Response (DeleteResource_ _) ->
-            ( model, Cmd.none )
-
-        Response (FileUpload (Ok files)) ->
-            ( { model | newResourceFiles = files ++ model.newResourceFiles }
             , Cmd.none
             )
 
-        Response (FileUpload (Err err)) ->
-            let
-                _ =
-                    Debug.log "File upload error" err
-            in
-            ( model
+        GotStatus result ->
+            ( { model
+                | session =
+                    Session.insertAuth (Auth.fromResult result) model.session
+              }
             , Cmd.none
             )
 
@@ -249,145 +167,79 @@ view model =
     { title = "Tokonoma"
     , body =
         [ toUnstyled <|
-            main_ [ css styling.main ] ([ global globalStyling ] ++ viewBody model)
+            main_ [ css styling.main ]
+                [ global globalStyling
+                , viewPage model
+                ]
         ]
     }
 
 
-viewBody : Model -> List (Html Msg)
-viewBody model =
-    case model.auth of
-        Loading ->
-            []
-
-        Anonymous ->
-            viewLogin model
-
-        Auth user ->
-            viewAdmin user model
-
-
-viewAdmin : User -> Model -> List (Html Msg)
-viewAdmin { username } model =
-    [ header [ css styling.header ]
-        [ h1 [] [ text "Tokonoma" ]
-        , section [ css styling.headerUser ]
-            [ h4 [] [ text username ]
-            , button [ onClick PerformLogout, css styling.logout ] [ text "Logout" ]
-            ]
-        ]
-    , section [ css styling.content ]
-        [ viewNewResource
-            model.newResourceTitle
-            model.newResourceBody
-            model.newResourceFiles
-        , viewResources model.resources
-        ]
-    ]
-
-
-viewResources : List Resource -> Html Msg
-viewResources resources =
-    section [] <|
-        List.map viewResource <|
-            List.sortBy (negate << .id) resources
-
-
-viewResource : Resource -> Html Msg
-viewResource { title, id, created, body } =
-    div [ css styling.resource ]
-        [ section []
-            [ span [] [ text "Id: ", text (String.fromInt id) ]
-            , text " | "
-            , time []
-                [ text "Created: "
-                , text (String.fromInt (Time.posixToMillis created))
-                , h2 [] [ text title ]
-                ]
-            , fromUnstyled <| Markdown.toHtml [] body
-            ]
-        , button [ onClick (DeleteResource id) ] [ text "delete" ]
-        ]
-
-
-viewLogin : Model -> List (Html Msg)
-viewLogin model =
+viewPage : Model -> Html Msg
+viewPage model =
     let
-        disable =
-            String.isEmpty model.password
-                || String.isEmpty model.username
+        page =
+            case model.page of
+                Login loginModel ->
+                    Html.Styled.map LoginMsg <|
+                        Page.Login.view loginModel
+
+                _ ->
+                    text "tododo"
     in
-    [ section [ css styling.login ]
-        [ Html.Styled.form [ onSubmit PerformLogin ]
-            [ input
-                [ onInput OnUsernameInput
-                , autofocus True
-                , placeholder "Username"
+    div []
+        [ header [ css styling.header ]
+            [ h1 [] [ text "Tokonoma" ]
+            , section [ css styling.headerUser ]
+                -- [ h4 [] [ text username ]
+                [ button [ onClick PerformLogout, css styling.logout ] [ text "Logout" ]
                 ]
-                []
-            , input
-                [ onInput OnPasswordInput
-                , type_ "password"
-                , placeholder "Password"
-                ]
-                []
-            , button [ disabled disable ] [ text "Login" ]
             ]
+        , section [ css styling.content ] [ page ]
         ]
-    ]
 
 
-viewNewResource : String -> String -> List File -> Html Msg
-viewNewResource title body files =
+
+-- ROUTING
+
+
+onNavigation : Url.Url -> Model -> ( Model, Cmd Msg )
+onNavigation url model =
     let
-        disable =
-            String.isEmpty title || String.isEmpty body
+        parser =
+            Parser.oneOf
+                [ route Parser.top
+                    (step model Resources ResourcesMsg (Page.Resources.init model.session))
+
+                -- , Parser.map Edit (Parser.s "edit")
+                ]
     in
-    Html.Styled.form [ onSubmit SaveNewResource, css styling.newResource ]
-        [ input
-            [ onInput OnTitleInput
-            , placeholder "New resource"
-            , value title
-            ]
-            []
-        , textarea
-            [ onInput OnBodyInput
-            , value body
-            ]
-            []
-        , input
-            [ type_ "file"
-            , attribute "multiple" "true"
-            , id "file-input"
-            , on "change" <|
-                Decode.succeed (OnSelectFile "file-input")
-            ]
-            []
-        , div [] (List.map (\{ filename } -> img [ src filename ] []) files)
-        , button [ disabled disable ] [ text "Save" ]
-        ]
+    case Session.auth model.session of
+        Auth.Auth user ->
+            Parser.parse parser url
+                |> Maybe.withDefault
+                    ( { model | page = NotFound }
+                    , Cmd.none
+                    )
+
+        _ ->
+            step model Login LoginMsg (Page.Login.init model.session)
+
+
+route : Parser a b -> a -> Parser (b -> c) c
+route parser handler =
+    Parser.map handler parser
+
+
+step : Model -> (page -> Page) -> (msg -> Msg) -> ( page, Cmd msg ) -> ( Model, Cmd Msg )
+step model toPage toMsg ( page, cmds ) =
+    ( { model | page = toPage page }
+    , Cmd.map toMsg cmds
+    )
 
 
 
--- LINK
 -- STYLING
-
-
-colors =
-    { lightGrey = hex "f0f0f0"
-    , grey = hex "2f2f2f"
-    , greyLighter = hex "3f3f3f"
-    , darkGrey = hex "1f1f1f"
-    , black = hex "111"
-    , white = hex "fff"
-    , green = hex "43DCC1"
-    , red = hex "FD3740"
-    , yellow = hex "F1D027"
-    , blue = hex "3CA5EA"
-    , offwhite = hex "fafafa"
-    , purple = hex "7F63D2"
-    , pink = hex "f9b2e1"
-    }
 
 
 styling =
@@ -413,53 +265,6 @@ styling =
         ]
     , content =
         [ padding (rem 2)
-        ]
-    , resource =
-        [ padding (rem 1)
-        , backgroundColor colors.white
-        , marginTop (rem 0.5)
-        , displayFlex
-        , justifyContent spaceBetween
-        , alignItems flexEnd
-        , Global.descendants
-            [ Global.button
-                [ color colors.red
-                , backgroundColor transparent
-                ]
-            ]
-        ]
-    , newResource =
-        [ padding (rem 1)
-        , backgroundColor colors.white
-        , marginTop (rem 0.5)
-        , boxShadow4 (rem 0.5) (rem 0.5) zero colors.lightGrey
-        , marginBottom (rem 2)
-        , Global.descendants
-            [ Global.button
-                [ Css.disabled
-                    [ color colors.greyLighter
-                    , cursor notAllowed
-                    ]
-                ]
-            ]
-        ]
-    , login =
-        [ backgroundColor colors.white
-        , padding (rem 1)
-        , width (rem 25)
-        , margin2 (vh 25) auto
-        , Global.descendants
-            [ Global.button
-                [ backgroundColor colors.blue
-                , padding2 (rem 0.5) (rem 1)
-                , color colors.white
-                , width (pct 100)
-                , Css.disabled
-                    [ color colors.greyLighter
-                    , cursor notAllowed
-                    ]
-                ]
-            ]
         ]
     , logout =
         [ backgroundColor colors.darkGrey
