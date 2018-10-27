@@ -25,6 +25,7 @@ dependencies:
   - servant-server
   - servant-auth
   - servant-auth-server
+  - servant-multipart
   - stm
   - text
   - time

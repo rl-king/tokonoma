@@ -3,15 +3,16 @@
     <head>
         <title>Tokonoma</title>
         <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-        <meta name="description" content="TODO:"/>
+
         <script>document.write('<script src="http://' + (location.host || 'localhost').split(':')[0] + ':35729/livereload.js?snipver=1"></' + 'script>')</script>
     </head>
     <body>
         <script src="main.js"></script>
 
         <script type="text/javascript">
+         // Add XSRF-TOKEN to every send request
+         // https://github.com/haskell-servant/servant-auth#xsrf-and-the-frontend
          (function(send) {
-             // https://github.com/haskell-servant/servant-auth#xsrf-and-the-frontend
              XMLHttpRequest.prototype.send = function(data) {
                  var token = document.cookie.match(new RegExp('XSRF-TOKEN=([^;]+)'))
                  if (token) {
@@ -23,7 +24,27 @@
              }
          })(XMLHttpRequest.prototype.send);
 
-         var app = Elm.Main.init(null);
+         const app = Elm.Main.init(null);
+
+         app.ports.onSelectFile.subscribe((id) => {
+             const node = document.getElementById(id);
+             if (node === null) {
+                 return;
+             }
+             const file = node.files[0];
+             const formData = new FormData();
+             formData.append("file", file);
+
+             const xhr = new XMLHttpRequest();
+             xhr.onload = (result) => {
+                 app.ports.onFileRead.send(result.target.response)
+             };
+             xhr.onerror = (error) => {
+                 console.log(error);
+             };
+             xhr.open("POST", "/file", true);
+             xhr.send(formData);
+         });
         </script>
     </body>
 </html>

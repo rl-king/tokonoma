@@ -9,6 +9,7 @@ import Control.Monad.IO.Class (liftIO)
 import Control.Monad.STM (atomically)
 import Control.Monad.Trans.Reader (ReaderT, ask, asks, runReaderT)
 import Data.Aeson (FromJSON, ToJSON, toEncoding, defaultOptions, encode, genericToEncoding)
+import Data.ByteString.Lazy as LBS
 import Data.Text (Text)
 import qualified Data.Text as Text
 import Data.Time.Clock (UTCTime, getCurrentTime)
@@ -21,11 +22,12 @@ import Network.Wai.Middleware.RequestLogger
 import Network.Wai.Middleware.RequestLogger.JSON
 import Servant
 import Servant.Auth.Server as Server
+import Servant.Multipart
 import System.IO
 import qualified System.Log.FastLogger as Log
 
 import qualified Database as DB
-import Database (Database, Resource(..))
+import Database (Database, Resource(..), NewFile(..))
 
 
 data State =
@@ -51,6 +53,7 @@ instance ToJSON LogMessage
 instance Log.ToLogStr LogMessage
   where toLogStr = Log.toLogStr . encode
 
+
 type AppM =
   ReaderT State Handler
 
@@ -62,9 +65,16 @@ type Api =
 
 type Protected =
   "status" :> Get '[JSON] User :<|>
-  "resources" :> ReqBody '[JSON] Text :> PostCreated '[JSON] NoContent :<|>
+  "resources" :> ReqBody '[JSON] DB.NewResource :> PostCreated '[JSON] NoContent :<|>
   "resources" :> Get '[JSON] [Resource] :<|>
-  "resources" :> Capture "resourceid" Int :> DeleteNoContent '[JSON] NoContent
+  "resources" :> Capture "resourceid" Int :> DeleteNoContent '[JSON] NoContent :<|>
+  "file" :> MultipartForm Mem (MultipartData Mem) :> Post '[JSON] Text
+
+
+-- instance FromMultipart Tmp NewFile where
+--   fromMultipart multipartData =
+--     NewFile <$> lookupInput "filename" multipartData
+--     <*> fmap fdPayload (lookupFile "content" multipartData)
 
 
 type Public =
@@ -150,13 +160,14 @@ protected authResult =
       return user :<|>
       addResource :<|>
       allResources :<|>
-      deleteResource
+      deleteResource :<|>
+      fileUpload
     _ ->
       throwAll err401
 
 
-addResource :: Text -> AppM NoContent
-addResource title = do
+addResource :: DB.NewResource -> AppM NoContent
+addResource new@(DB.NewResource title _)= do
   -- log
   logset <- asks logger
   currentTime <- liftIO getCurrentTime
@@ -165,7 +176,7 @@ addResource title = do
   liftIO $ Log.pushLogStrLn logset $ Log.toLogStr msg
   -- insert
   State{database = db} <- ask
-  liftIO $ atomically $ modifyTVar db (DB.insert title posix)
+  liftIO $ atomically $ modifyTVar db (DB.insert new posix)
   return NoContent
 
 
@@ -176,7 +187,7 @@ deleteResource uid = do
   currentTime <- liftIO getCurrentTime
   let msg = LogMessage ("Removing: " <> (Text.pack $ show uid)) currentTime
   liftIO $ Log.pushLogStrLn logset $ Log.toLogStr msg
-  -- insert
+  -- delete
   State{database = db} <- ask
   liftIO $ atomically $ modifyTVar db (DB.delete uid)
   return NoContent
@@ -198,6 +209,20 @@ public cookieSettings jwtSettings =
 logout :: CookieSettings -> AppM (CredHeaders NoContent)
 logout cookieSettings =
   return $ clearSession cookieSettings NoContent
+
+
+fileUpload :: MultipartData Mem -> AppM Text
+fileUpload multipartData = do
+  -- log
+  logset <- asks logger
+  currentTime <- liftIO getCurrentTime
+  posix <- liftIO $ fromInteger . round <$> getPOSIXTime
+  let msg = LogMessage ("Adding: " <> fdFileName file) currentTime
+  liftIO $ Log.pushLogStrLn logset $ Log.toLogStr msg
+  -- -- insert
+  liftIO $ LBS.writeFile "files/foo.png" (fdPayload file)
+  return $ Text.pack (show $ fdFileName file)
+    where (file:_) = files multipartData
 
 
 -- USER
