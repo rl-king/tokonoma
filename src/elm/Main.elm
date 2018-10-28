@@ -6,25 +6,19 @@ import Css exposing (..)
 import Css.Breakpoint as Breakpoint
 import Css.Global as Global exposing (global)
 import Data.Auth as Auth exposing (Auth)
-import Data.File as File exposing (File)
 import Data.Request as Request
 import Data.Resource as Resource exposing (Resource)
 import Data.Session as Session
-import Data.Update as Update
 import Data.User as User exposing (User)
 import Html.Styled exposing (..)
-import Html.Styled.Attributes exposing (css)
-import Html.Styled.Events exposing (on, onClick, onInput, onSubmit)
-import Html.Styled.Keyed as Keyed
+import Html.Styled.Attributes exposing (css, href)
+import Html.Styled.Events exposing (onClick)
 import Http
 import Json.Decode as Decode
-import Json.Encode as Encode
-import Page.Edit
-import Page.Login
-import Page.Resources
-import Set exposing (Set)
+import Page.Edit as Edit
+import Page.Login as Login
+import Page.Resources as Resources
 import Specification exposing (colors)
-import String.Interpolate exposing (interpolate)
 import Task exposing (Task)
 import Url exposing (Url)
 import Url.Builder as Builder
@@ -75,25 +69,24 @@ subscriptions model =
 
 
 type alias Model =
-    { session : Session.Data
+    { key : Navigation.Key
     , page : Page
     }
 
 
 type Page
-    = Resources Page.Resources.Model
-    | Edit Page.Edit.Model
-    | Login Page.Login.Model
-    | Loading
-    | NotFound
+    = Resources Resources.Model
+    | Edit Edit.Model
+    | Login Login.Model
+    | Loading Session.Data
+    | NotFound Session.Data
 
 
 init : flags -> Url -> Navigation.Key -> ( Model, Cmd Msg )
 init _ url key =
-    onNavigation url { session = Session.init key, page = Loading }
-        |> (\( model, cmds ) ->
-                ( model, Cmd.batch [ Task.attempt GotStatus Request.getStatus, cmds ] )
-           )
+    ( { key = key, page = Loading Session.init }
+    , Task.attempt (GotStatus url) Request.getStatus
+    )
 
 
 
@@ -103,21 +96,22 @@ init _ url key =
 type Msg
     = OnUrlChange Url
     | OnUrlRequest Browser.UrlRequest
-    | LoginMsg Page.Login.Msg
-    | ResourcesMsg Page.Resources.Msg
+    | LoginMsg Login.Msg
+    | ResourcesMsg Resources.Msg
+    | EditMsg Edit.Msg
     | PerformLogout
-    | GotStatus (Result Http.Error User)
+    | GotStatus Url (Result Http.Error User)
     | GotLogout (Result Http.Error ())
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
-update msg ({ session } as model) =
+update msg model =
     case msg of
-        OnUrlChange location ->
-            ( model, Cmd.none )
+        OnUrlChange url ->
+            onNavigation url model
 
         OnUrlRequest (Browser.Internal url) ->
-            ( model, Navigation.pushUrl (Session.navKey session) (Url.toString url) )
+            ( model, Navigation.pushUrl model.key (Url.toString url) )
 
         OnUrlRequest (Browser.External href) ->
             ( model, Navigation.load href )
@@ -125,7 +119,7 @@ update msg ({ session } as model) =
         LoginMsg loginMsg ->
             case model.page of
                 Login loginModel ->
-                    step model Login LoginMsg (Page.Login.update loginMsg loginModel)
+                    step model Login LoginMsg (Login.update loginMsg loginModel)
 
                 _ ->
                     ( model, Cmd.none )
@@ -134,7 +128,16 @@ update msg ({ session } as model) =
             case model.page of
                 Resources resourcesModel ->
                     step model Resources ResourcesMsg <|
-                        Page.Resources.update resourcesMsg resourcesModel
+                        Resources.update resourcesMsg resourcesModel
+
+                _ ->
+                    ( model, Cmd.none )
+
+        EditMsg editMsg ->
+            case model.page of
+                Edit editModel ->
+                    step model Edit EditMsg <|
+                        Edit.update editMsg editModel
 
                 _ ->
                     ( model, Cmd.none )
@@ -149,13 +152,11 @@ update msg ({ session } as model) =
             , Cmd.none
             )
 
-        GotStatus result ->
-            ( { model
-                | session =
-                    Session.insertAuth (Auth.fromResult result) model.session
-              }
-            , Cmd.none
-            )
+        GotStatus url result ->
+            onNavigation url
+                { model
+                    | page = Loading (Session.insertAuth (Auth.fromResult result) Session.init)
+                }
 
 
 
@@ -182,19 +183,28 @@ viewPage model =
             case model.page of
                 Login loginModel ->
                     Html.Styled.map LoginMsg <|
-                        Page.Login.view loginModel
+                        Login.view loginModel
+
+                Resources resourcesModel ->
+                    Html.Styled.map ResourcesMsg <|
+                        Resources.view resourcesModel
+
+                Edit editModel ->
+                    Html.Styled.map EditMsg <|
+                        Edit.view editModel
 
                 _ ->
                     text "tododo"
     in
     div []
         [ header [ css styling.header ]
-            [ h1 [] [ text "Tokonoma" ]
+            [ a [ href "/" ] [ h1 [] [ text "Tokonoma" ] ]
             , section [ css styling.headerUser ]
                 -- [ h4 [] [ text username ]
                 [ button [ onClick PerformLogout, css styling.logout ] [ text "Logout" ]
                 ]
             ]
+        , a [ href "/edit" ] [ text "Edit" ]
         , section [ css styling.content ] [ page ]
         ]
 
@@ -203,27 +213,49 @@ viewPage model =
 -- ROUTING
 
 
+toSession : Model -> Session.Data
+toSession model =
+    case model.page of
+        Resources m ->
+            m.session
+
+        Edit m ->
+            m.session
+
+        Login m ->
+            m.session
+
+        Loading s ->
+            s
+
+        NotFound s ->
+            s
+
+
 onNavigation : Url.Url -> Model -> ( Model, Cmd Msg )
 onNavigation url model =
     let
+        session =
+            toSession model
+
         parser =
             Parser.oneOf
-                [ route Parser.top
-                    (step model Resources ResourcesMsg (Page.Resources.init model.session))
-
-                -- , Parser.map Edit (Parser.s "edit")
+                [ route Parser.top <|
+                    step model Resources ResourcesMsg (Resources.init session)
+                , route (Parser.s "edit") <|
+                    step model Edit EditMsg (Edit.init session)
                 ]
     in
-    case Session.auth model.session of
+    case Session.auth session of
         Auth.Auth user ->
             Parser.parse parser url
                 |> Maybe.withDefault
-                    ( { model | page = NotFound }
+                    ( { model | page = NotFound session }
                     , Cmd.none
                     )
 
         _ ->
-            step model Login LoginMsg (Page.Login.init model.session)
+            step model Login LoginMsg (Login.init session)
 
 
 route : Parser a b -> a -> Parser (b -> c) c
@@ -231,7 +263,7 @@ route parser handler =
     Parser.map handler parser
 
 
-step : Model -> (page -> Page) -> (msg -> Msg) -> ( page, Cmd msg ) -> ( Model, Cmd Msg )
+step : Model -> (a -> Page) -> (msg -> Msg) -> ( a, Cmd msg ) -> ( Model, Cmd Msg )
 step model toPage toMsg ( page, cmds ) =
     ( { model | page = toPage page }
     , Cmd.map toMsg cmds
@@ -253,6 +285,8 @@ styling =
         , displayFlex
         , justifyContent spaceBetween
         , alignItems center
+        , Global.descendants
+            [ Global.a [ color colors.white ] ]
         ]
     , headerUser =
         [ displayFlex

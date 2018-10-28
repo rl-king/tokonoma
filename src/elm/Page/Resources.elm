@@ -22,12 +22,14 @@ import Time
 
 
 type alias Model =
-    { resources : List Resource }
+    { session : Session.Data
+    }
 
 
 init : Session.Data -> ( Model, Cmd Msg )
 init session =
-    ( { resources = [] }
+    ( { session = session
+      }
     , Task.attempt GotResources Request.getResources
     )
 
@@ -45,10 +47,14 @@ update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
         DeleteResource id ->
-            ( model, Cmd.none )
+            ( model
+            , Task.attempt GotResources <|
+                Task.andThen (\_ -> Request.getResources) <|
+                    Request.deleteResource id
+            )
 
         GotResources (Ok resources) ->
-            ( model, Cmd.none )
+            ( { model | session = Session.insertResources resources model.session }, Cmd.none )
 
         GotResources (Err err) ->
             ( model, Cmd.none )
@@ -62,7 +68,7 @@ view : Model -> Html Msg
 view model =
     section [] <|
         List.map viewResource <|
-            List.sortBy (negate << .id) model.resources
+            Session.getResources model.session
 
 
 viewResource : Resource -> Html Msg

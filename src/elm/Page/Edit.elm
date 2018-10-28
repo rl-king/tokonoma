@@ -1,4 +1,4 @@
-port module Page.Edit exposing (Model, Msg, update, view)
+port module Page.Edit exposing (Model, Msg, init, update, view)
 
 import Css exposing (..)
 import Css.Breakpoint as Breakpoint
@@ -6,6 +6,7 @@ import Css.Global as Global exposing (global)
 import Data.File exposing (File)
 import Data.Request as Request
 import Data.Resource as Resource exposing (Resource)
+import Data.Session as Session
 import Html.Styled exposing (..)
 import Html.Styled.Attributes
     exposing
@@ -37,10 +38,22 @@ port onSelectFile : String -> Cmd msg
 
 
 type alias Model =
-    { title : String
+    { session : Session.Data
+    , title : String
     , body : String
     , files : List File
     }
+
+
+init : Session.Data -> ( Model, Cmd Msg )
+init session =
+    ( { session = session
+      , title = ""
+      , body = ""
+      , files = []
+      }
+    , Cmd.none
+    )
 
 
 

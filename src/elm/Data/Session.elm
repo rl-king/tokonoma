@@ -1,13 +1,16 @@
 module Data.Session exposing
     ( Data
     , auth
+    , getResources
     , init
     , insertAuth
-    , navKey
+    , insertResources
     )
 
 import Browser.Navigation as Navigation
 import Data.Auth exposing (Auth(..))
+import Data.Resource exposing (Resource)
+import Dict exposing (Dict)
 
 
 
@@ -16,8 +19,8 @@ import Data.Auth exposing (Auth(..))
 
 type Data
     = Data
-        { navKey : Navigation.Key
-        , auth : Auth
+        { auth : Auth
+        , resources : Dict Int Resource
         }
 
 
@@ -25,17 +28,22 @@ type Data
 -- INSERT
 
 
-init : Navigation.Key -> Data
-init key =
+init : Data
+init =
     Data
-        { navKey = key
-        , auth = Anonymous
+        { auth = Anonymous
+        , resources = Dict.empty
         }
 
 
 insertAuth : Auth -> Data -> Data
 insertAuth a (Data data) =
     Data { data | auth = a }
+
+
+insertResources resources (Data data) =
+    List.foldl (\rsc acc -> Dict.insert rsc.id rsc acc) data.resources resources
+        |> (\newResources -> Data { data | resources = newResources })
 
 
 
@@ -47,6 +55,8 @@ auth (Data data) =
     data.auth
 
 
-navKey : Data -> Navigation.Key
-navKey (Data data) =
-    data.navKey
+getResources : Data -> List Resource
+getResources (Data data) =
+    List.sortBy (negate << .id) <|
+        List.map Tuple.second <|
+            Dict.toList data.resources
