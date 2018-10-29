@@ -4,25 +4,23 @@
 {-# LANGUAGE TypeOperators #-}
 module Server where
 
-import Control.Concurrent.STM.TVar (TVar, newTVar, readTVar, writeTVar, modifyTVar)
+import Control.Concurrent.STM.TVar (TVar, newTVar, readTVar, modifyTVar)
 import Control.Monad (forM_)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.STM (atomically)
 import Control.Monad.Trans.Reader (ReaderT, ask, asks, runReaderT)
-import Data.Aeson (FromJSON, ToJSON, toEncoding, defaultOptions, encode, genericToEncoding)
+import Data.Aeson (FromJSON, ToJSON)
 import Data.ByteString.Lazy as LBS
 import Data.Text (Text)
 import qualified Data.Text as Text
-import Data.Time.Clock (UTCTime, getCurrentTime)
+import Data.Time.Clock (getCurrentTime)
 import Data.Time.Clock.POSIX (getPOSIXTime)
 import GHC.Generics (Generic)
 import Network.HTTP.Types (status200)
 import qualified Network.Wai.Handler.Warp as Warp
-import Network.Wai (Middleware, responseLBS)
+import Network.Wai (responseLBS)
 import Network.Wai.Application.Static
 import Network.Wai.Middleware.Gzip
-import Network.Wai.Middleware.RequestLogger
-import Network.Wai.Middleware.RequestLogger.JSON
 import Servant
 import Servant.Auth.Server as Server
 import Servant.Multipart
@@ -31,44 +29,19 @@ import qualified System.Log.FastLogger as Log
 
 import qualified Database as DB
 import Database (Database, Resource(..), FileInfo(..))
+import Server.Log
 
 
-data State =
-  State
-  { database :: TVar Database
-  , adminUsername :: Text
-  , adminPassword :: Text
-  , logger :: Log.LoggerSet
-  }
-
-
-data LogMessage =
-  LogMessage
-  { message :: !Text
-  , timestamp :: !UTCTime
-  } deriving (Eq, Show, Generic)
-
-
-instance FromJSON LogMessage
-instance ToJSON LogMessage
-  where toEncoding = genericToEncoding defaultOptions
-
-
-instance Log.ToLogStr LogMessage
-  where toLogStr = Log.toLogStr . encode
-
-
-type AppM =
-  ReaderT State Handler
+-- API
 
 
 type Api =
-  (Server.Auth '[Cookie] User :> Protected) :<|>
+  Server.Auth '[Cookie] Identity :> Private :<|>
   Public
 
 
-type Protected =
-  "status" :> Get '[JSON] User :<|>
+type Private =
+  "status" :> Get '[JSON] Identity :<|>
   "resources" :> ReqBody '[JSON] DB.NewResource :> PostCreated '[JSON] NoContent :<|>
   "resources" :> Get '[JSON] [Resource] :<|>
   "resources" :> Capture "resourceid" Int :> DeleteNoContent '[JSON] NoContent :<|>
@@ -77,14 +50,18 @@ type Protected =
 
 type Public =
   "logout" :> Post '[JSON] (CredHeaders NoContent) :<|>
-  "login" :> ReqBody '[JSON] LoginCredentials :> Post '[JSON] (CredHeaders User) :<|>
+  "login" :> ReqBody '[JSON] LoginCredentials :> Post '[JSON] (CredHeaders Identity) :<|>
   Raw
 
 
 type CredHeaders a =
-  Headers '[ Header "Set-Cookie" SetCookie
-           , Header "Set-Cookie" SetCookie
-           ] a
+  Headers
+    '[ Header "Set-Cookie" SetCookie
+     , Header "Set-Cookie" SetCookie
+     ] a
+
+
+-- PROXY
 
 
 api :: Proxy Api
@@ -97,10 +74,18 @@ hoistContext =
   Proxy
 
 
--- jsonRequestLogger :: IO Middleware
--- jsonRequestLogger =
---   mkRequestLogger $
---   def { outputFormat = CustomOutputFormatWithDetails formatAsJSON }
+-- STATE
+
+
+data State =
+  State
+  { database :: TVar Database
+  , logger :: Log.LoggerSet
+  }
+
+
+type AppM =
+  ReaderT State Handler
 
 
 -- RUN
@@ -108,7 +93,7 @@ hoistContext =
 
 run :: IO ()
 run = do
-  key <- generateKey
+  jwtKey <- generateKey
   initData <- atomically $ newTVar DB.init
 
   -- warpLogger <- jsonRequestLogger
@@ -119,83 +104,77 @@ run = do
   Log.pushLogStrLn appLogger (Log.toLogStr msg) >> Log.flushLogStr appLogger
 
   let jwtSettings =
-        defaultJWTSettings key
+        defaultJWTSettings jwtKey
+
       cookieSettings =
         defaultCookieSettings
         { cookieIsSecure = NotSecure
         , cookieSameSite = SameSiteStrict
         }
+
       context =
          cookieSettings :. jwtSettings :. EmptyContext
+
       state =
-        flip runReaderT (State initData "admin" "admin" appLogger)
-  Warp.runSettings settings .
+        flip runReaderT (State initData appLogger)
+
+  Warp.runSettings warpSettings .
     gzip def { gzipFiles = GzipCompress } .
     -- warpLogger $
     serveWithContext api context $
     hoistServerWithContext api hoistContext state $
-    server cookieSettings jwtSettings
+    handlers cookieSettings jwtSettings
 
 
-settings :: Warp.Settings
-settings =
+warpSettings :: Warp.Settings
+warpSettings =
   Warp.setPort port $
   Warp.setBeforeMainLoop (hPutStrLn stderr ("listening on port " ++ show port))
   Warp.defaultSettings
   where port = 8080
 
 
-server :: CookieSettings -> JWTSettings -> ServerT Api AppM
-server cookieSettings jwtSettings =
-  protected :<|>
+handlers :: CookieSettings -> JWTSettings -> ServerT Api AppM
+handlers cookieSettings jwtSettings =
+  private :<|>
   public cookieSettings jwtSettings
 
 
--- PROTECTED
+-- PRIVATE
 
 
-protected :: Server.AuthResult User -> ServerT Protected AppM
-protected authResult =
+private :: Server.AuthResult Identity -> ServerT Private AppM
+private authResult =
   case authResult of
-    (Server.Authenticated user) ->
+    Server.Authenticated user ->
       return user :<|>
-      addResource :<|>
-      allResources :<|>
-      deleteResource :<|>
-      fileUpload
+      handleAddResource :<|>
+      handleAllResources :<|>
+      handleDeleteResource :<|>
+      handleFileUpload
     _ ->
       throwAll err401
 
 
-addResource :: DB.NewResource -> AppM NoContent
-addResource new@(DB.NewResource title _ _)= do
-  -- log
-  logset <- asks logger
-  currentTime <- liftIO getCurrentTime
+handleAddResource :: DB.NewResource -> AppM NoContent
+handleAddResource new@(DB.NewResource title _ _)= do
   posix <- liftIO $ fromInteger . round <$> getPOSIXTime
-  let msg = LogMessage ("Adding: " <> title) currentTime
-  liftIO $ Log.pushLogStrLn logset $ Log.toLogStr msg
-  -- insert
   State{database = db} <- ask
   liftIO $ atomically $ modifyTVar db (DB.insert new posix)
+  log' ("Adding: " <> title)
   return NoContent
 
 
-deleteResource :: Int -> AppM NoContent
-deleteResource uid = do
-  -- log
-  logset <- asks logger
-  currentTime <- liftIO getCurrentTime
-  let msg = LogMessage ("Removing: " <> Text.pack (show uid)) currentTime
-  liftIO $ Log.pushLogStrLn logset $ Log.toLogStr msg
-  -- delete
+handleDeleteResource :: Int -> AppM NoContent
+handleDeleteResource uid = do
   State{database = db} <- ask
   liftIO $ atomically $ modifyTVar db (DB.delete uid)
+  log' ("Removing: " <> Text.pack (show uid))
   return NoContent
 
 
-allResources :: AppM [Resource]
-allResources = do
+handleAllResources :: AppM [Resource]
+handleAllResources = do
   State{database = db} <- ask
   liftIO $ fmap DB.all . atomically $ readTVar db
 
@@ -205,62 +184,80 @@ allResources = do
 
 public :: CookieSettings -> JWTSettings -> ServerT Public AppM
 public cookieSettings jwtSettings =
-  logout cookieSettings :<|>
-  login cookieSettings jwtSettings :<|>
-  Servant.serveDirectoryWith ((defaultWebAppSettings "./static") { ss404Handler = Just indexHtml })
+  handleLogout cookieSettings :<|>
+  handleLogin cookieSettings jwtSettings :<|>
+  Servant.serveDirectoryWith ((defaultWebAppSettings "./static")
+                              { ss404Handler = Just handleSpa })
 
 
-indexHtml :: Application
-indexHtml _ respond = do
+handleSpa :: Application
+handleSpa _ respond = do
   file <- liftIO $ LBS.readFile "static/index.html"
   respond $ responseLBS status200 [] file
 
 
-logout :: CookieSettings -> AppM (CredHeaders NoContent)
-logout cookieSettings =
+handleLogout :: CookieSettings -> AppM (CredHeaders NoContent)
+handleLogout cookieSettings =
   return $ clearSession cookieSettings NoContent
 
 
-fileUpload :: MultipartData Mem -> AppM [FileInfo]
-fileUpload multipartData = do
-  -- log
-  logset <- asks logger
-  currentTime <- liftIO getCurrentTime
-  posix <- liftIO $ fromInteger . round <$> getPOSIXTime
-  let
-    msg = LogMessage ("Adding: " <> Text.pack (show $ fmap fdFileName files')) currentTime
-  liftIO $ Log.pushLogStrLn logset $ Log.toLogStr msg
-  -- write to disk
+handleFileUpload :: MultipartData Mem -> AppM [FileInfo]
+handleFileUpload multipartData = do
   liftIO $ forM_ files'
     (\file -> LBS.writeFile ("static/files/" ++ Text.unpack (fdFileName file)) (fdPayload file))
+  log' ("Adding: " <> Text.pack (show $ fdFileName <$> files'))
   return $ fileUploadResponse files'
     where files' = files multipartData
 
 
 fileUploadResponse :: [FileData a] -> [FileInfo]
 fileUploadResponse =
+  let
+    toFileData file =
+      FileInfo (fdFileName file) $
+      Text.pack ("/files/" ++ Text.unpack (fdFileName file))
+  in
   fmap toFileData
-  where toFileData file =
-          FileInfo
-          (fdFileName file) $
-          Text.pack ("/files/" ++ Text.unpack (fdFileName file))
+
+
+handleLogin :: CookieSettings -> JWTSettings -> LoginCredentials -> AppM (CredHeaders Identity)
+handleLogin cookieSettings jwtSettings credentials =
+  case validateLogin credentials of
+    Nothing ->
+      throwError err401
+    Just user -> do
+      maybeAddCookies <- liftIO $ acceptLogin cookieSettings jwtSettings user
+      case maybeAddCookies of
+        Nothing ->
+          throwError err401
+        Just addCookies ->
+          return $ addCookies user
+
+
+validateLogin :: LoginCredentials -> Maybe Identity
+validateLogin (LoginCredentials u p) =
+  if (u == "admin") && (p == "admin") then
+    Just $ Identity "Administrator" "hello@tokonoma.com"
+  else
+    Nothing
+
 
 -- USER
 
 
-data User =
-  User
+data Identity =
+  Identity
   { name :: String
   , email :: String
   } deriving (Eq, Show, Read, Generic)
 
 
-instance ToJSON User
-instance FromJSON User
+instance ToJSON Identity
+instance FromJSON Identity
 
 
-instance ToJWT User
-instance FromJWT User
+instance ToJWT Identity
+instance FromJWT Identity
 
 
 -- LOGIN
@@ -277,24 +274,12 @@ instance ToJSON LoginCredentials
 instance FromJSON LoginCredentials
 
 
-login :: CookieSettings -> JWTSettings -> LoginCredentials -> AppM (CredHeaders User)
-login cookieSettings jwtSettings credentials = do
-  state <- ask
-  case validateLogin state credentials of
-    Nothing ->
-      throwError err401
-    Just user -> do
-      maybeAddCookies <- liftIO $ acceptLogin cookieSettings jwtSettings user
-      case maybeAddCookies of
-        Nothing ->
-          throwError err401
-        Just addCookies ->
-          return $ addCookies user
+-- LOG
 
 
-validateLogin :: State -> LoginCredentials -> Maybe User
-validateLogin state (LoginCredentials u p ) =
-  if (u == adminUsername state) && (p == adminPassword state) then
-    Just $ User "Administrator" "hello@tokonoma.com"
-  else
-    Nothing
+log' :: Text -> AppM ()
+log' msg = do
+  currentTime <- liftIO getCurrentTime
+  logset <- asks logger
+  liftIO $ Log.pushLogStrLn logset $
+    Log.toLogStr (LogMessage msg currentTime)
