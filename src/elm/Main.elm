@@ -29,13 +29,7 @@ import Url.Parser as Parser
         , Parser
         )
 import Url.Parser.Query as Query
-
-
-
--- PORTS
-
-
-port onFileUpload : (Decode.Value -> msg) -> Sub msg
+import View.Header
 
 
 
@@ -56,15 +50,10 @@ main =
 
 subscriptions : Model -> Sub Msg
 subscriptions model =
-    Sub.none
+    Sub.map EditMsg Edit.subscriptions
 
 
 
--- onFileUpload
---     (Response
---         << FileUpload
---         << File.decodeFileUpload
---     )
 -- MODEL
 
 
@@ -154,10 +143,12 @@ update msg model =
 
         GotLogout result ->
             let
-                key =
-                    Session.getNavKey (toSession model)
+                session =
+                    toSession model
             in
-            ( model, Navigation.pushUrl key "/login" )
+            ( { model | page = Redirect (Session.new session) }
+            , Navigation.pushUrl (Session.getNavKey session) "/login"
+            )
 
         GotStatus url result ->
             let
@@ -166,9 +157,17 @@ update msg model =
             in
             case Auth.fromResult result of
                 Auth.Anonymous ->
+                    let
+                        queryParams =
+                            if url.path == "/login" then
+                                [ Builder.string "redirect" "/" ]
+
+                            else
+                                [ Builder.string "redirect" (Url.toString url) ]
+                    in
                     ( model
                     , Navigation.replaceUrl key <|
-                        Builder.absolute [ "login" ] [ Builder.string "red" (Url.toString url) ]
+                        Builder.absolute [ "login" ] queryParams
                     )
 
                 Auth.Auth user ->
@@ -184,7 +183,6 @@ update msg model =
 
 
 
--- ( {model = }, Navigation.pushUrl model.key "/login" )
 -- VIEW
 
 
@@ -193,7 +191,7 @@ view model =
     { title = "Tokonoma"
     , body =
         [ toUnstyled <|
-            main_ [ css styling.main ]
+            div []
                 [ global globalStyling
                 , viewPage model
                 ]
@@ -204,53 +202,37 @@ view model =
 viewPage : Model -> Html Msg
 viewPage model =
     let
-        page =
-            case model.page of
-                Login loginModel ->
-                    Html.Styled.map LoginMsg <|
-                        Login.view loginModel
-
-                Resources resourcesModel ->
-                    Html.Styled.map ResourcesMsg <|
-                        Resources.view resourcesModel
-
-                Edit editModel ->
-                    Html.Styled.map EditMsg <|
-                        Edit.view editModel
-
-                _ ->
-                    text "tododo"
-    in
-    div []
-        [ header [ css styling.header ]
-            [ a [ href "/" ] [ h1 [] [ text "Tokonoma" ] ]
-            , section [ css styling.headerUser ]
-                -- [ h4 [] [ text username ]
-                [ button [ onClick PerformLogout, css styling.logout ] [ text "Logout" ]
+        wrap msg pageView =
+            section []
+                [ View.Header.view PerformLogout
+                , Html.Styled.map msg pageView
                 ]
-            ]
-        , a [ href "/edit" ] [ text "Edit" ]
-        , section [ css styling.content ] [ page ]
-        ]
+    in
+    case model.page of
+        Login loginModel ->
+            wrap LoginMsg <|
+                Login.view loginModel
+
+        Resources resourcesModel ->
+            wrap ResourcesMsg <|
+                Resources.view resourcesModel
+
+        Edit editModel ->
+            wrap EditMsg <|
+                Edit.view editModel
+
+        NotFound _ ->
+            text "NotFound"
+
+        Status _ ->
+            text ""
+
+        Redirect _ ->
+            text ""
 
 
 
 -- ROUTING
--- mapPageSession : (Session.Data -> Session.Data) -> Page -> Page
--- mapPageSession fn page =
---     case page of
---         Resources m ->
---             Resources { m | session = fn m.session }
---         Edit m ->
---             fn m.session
---         Login m ->
---             fn m.session
---         Loading s ->
---             fn
---                 s
---         NotFound s ->
---             fn s
---                 s
 
 
 toSession : Model -> Session.Data
@@ -287,9 +269,13 @@ onNavigation url model =
                     step model Resources ResourcesMsg (Resources.init session)
                 , route (Parser.s "edit") <|
                     step model Edit EditMsg (Edit.init session)
-                , route (Parser.s "login") <|
-                    step model Login LoginMsg (Login.init session)
+                , route (Parser.s "login" <?> Query.string "redirect") <|
+                    (step model Login LoginMsg << Login.init session)
                 ]
+
+        loginParser =
+            route (Parser.s "login" <?> Query.string "redirect") <|
+                (step model Login LoginMsg << Login.init session)
     in
     case Session.getAuth session of
         Auth.Auth user ->
@@ -300,7 +286,9 @@ onNavigation url model =
                     )
 
         _ ->
-            step model Login LoginMsg (Login.init session)
+            Parser.parse loginParser url
+                |> Maybe.withDefault
+                    (step model Login LoginMsg (Login.init session Nothing))
 
 
 route : Parser a b -> a -> Parser (b -> c) c
@@ -317,39 +305,6 @@ step model toPage toMsg ( page, cmds ) =
 
 
 -- STYLING
-
-
-styling =
-    { main =
-        [ Breakpoint.small []
-        ]
-    , header =
-        [ color colors.white
-        , backgroundColor colors.black
-        , padding2 (rem 1) (rem 2)
-        , displayFlex
-        , justifyContent spaceBetween
-        , alignItems center
-        , Global.descendants
-            [ Global.a [ color colors.white ] ]
-        ]
-    , headerUser =
-        [ displayFlex
-        , justifyContent flexEnd
-        , alignItems center
-        , Global.descendants
-            [ Global.button
-                [ marginLeft (rem 1) ]
-            ]
-        ]
-    , content =
-        [ padding (rem 2)
-        ]
-    , logout =
-        [ backgroundColor colors.darkGrey
-        , color colors.red
-        ]
-    }
 
 
 globalStyling =

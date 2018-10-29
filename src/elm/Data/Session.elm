@@ -7,6 +7,7 @@ module Data.Session exposing
     , init
     , insertAuth
     , insertResources
+    , new
     )
 
 import Browser.Navigation as Navigation
@@ -36,6 +37,15 @@ init key =
     Data
         { auth = Anonymous
         , navKey = key
+        , resources = Dict.empty
+        }
+
+
+new : Data -> Data
+new (Data data) =
+    Data
+        { auth = Anonymous
+        , navKey = data.navKey
         , resources = Dict.empty
         }
 

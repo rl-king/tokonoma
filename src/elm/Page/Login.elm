@@ -4,7 +4,7 @@ import Browser.Navigation as Navigation
 import Css exposing (..)
 import Css.Breakpoint as Breakpoint
 import Css.Global as Global exposing (global)
-import Data.Auth exposing (Auth(..))
+import Data.Auth as Auth exposing (Auth(..))
 import Data.Request as Request
 import Data.Resource as Resource exposing (Resource)
 import Data.Session as Session
@@ -33,14 +33,26 @@ import Time
 
 type alias Model =
     { session : Session.Data
+    , redirectUrl : Maybe String
     , username : String
     , password : String
     }
 
 
-init : Session.Data -> ( Model, Cmd msg )
-init session =
-    ( Model session "" "", Cmd.none )
+init : Session.Data -> Maybe String -> ( Model, Cmd msg )
+init session redirectUrl =
+    let
+        redirect =
+            case Session.getAuth session of
+                Auth.Auth _ ->
+                    Navigation.replaceUrl (Session.getNavKey session) "/"
+
+                _ ->
+                    Cmd.none
+    in
+    ( Model session redirectUrl "" ""
+    , redirect
+    )
 
 
 
@@ -70,8 +82,12 @@ update msg model =
             )
 
         GotPerformLogin (Ok user) ->
+            let
+                url =
+                    Maybe.withDefault "/" model.redirectUrl
+            in
             ( { model | session = Session.insertAuth (Auth user) model.session }
-            , Navigation.replaceUrl (Session.getNavKey model.session) "/"
+            , Navigation.replaceUrl (Session.getNavKey model.session) url
             )
 
         GotPerformLogin (Err err) ->

@@ -1,9 +1,9 @@
-port module Page.Edit exposing (Model, Msg, init, update, view)
+port module Page.Edit exposing (Model, Msg, init, subscriptions, update, view)
 
 import Css exposing (..)
 import Css.Breakpoint as Breakpoint
 import Css.Global as Global exposing (global)
-import Data.File exposing (File)
+import Data.File as File exposing (File)
 import Data.Request as Request
 import Data.Resource as Resource exposing (Resource)
 import Data.Session as Session
@@ -30,7 +30,19 @@ import Task
 import Time
 
 
+
+-- PORTS
+
+
+port onFileUpload : (Decode.Value -> msg) -> Sub msg
+
+
 port onSelectFile : String -> Cmd msg
+
+
+subscriptions : Sub Msg
+subscriptions =
+    onFileUpload (GotFileUpload << File.decodeFileUpload)
 
 
 
@@ -65,6 +77,7 @@ type Msg
     | OnBodyInput String
     | SaveResource
     | GotSaveResource (Result Http.Error ())
+    | GotFileUpload (Result Decode.Error (List File))
     | OnSelectFile String
 
 
@@ -87,6 +100,12 @@ update msg model =
             )
 
         GotSaveResource _ ->
+            ( model, Cmd.none )
+
+        GotFileUpload (Ok files) ->
+            ( { model | files = files }, Cmd.none )
+
+        GotFileUpload (Err _) ->
             ( model, Cmd.none )
 
 

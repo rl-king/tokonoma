@@ -228,11 +228,11 @@ fileUpload multipartData = do
   currentTime <- liftIO getCurrentTime
   posix <- liftIO $ fromInteger . round <$> getPOSIXTime
   let
-    msg = LogMessage ("Adding: " <> Text.pack (show files')) currentTime
+    msg = LogMessage ("Adding: " <> Text.pack (show $ fmap fdFileName files')) currentTime
   liftIO $ Log.pushLogStrLn logset $ Log.toLogStr msg
   -- write to disk
   liftIO $ forM_ files'
-    (\file -> LBS.writeFile ("files/" ++ Text.unpack (fdFileName file)) (fdPayload file))
+    (\file -> LBS.writeFile ("static/files/" ++ Text.unpack (fdFileName file)) (fdPayload file))
   return $ fmap (\f -> Text.pack ("/files/" ++ Text.unpack (fdFileName f))) files'
     where files' = files multipartData
 
