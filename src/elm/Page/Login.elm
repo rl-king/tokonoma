@@ -108,7 +108,8 @@ view model =
                 || String.isEmpty model.username
     in
     section [ css styling.login ]
-        [ Html.Styled.form [ onSubmit PerformLogin ]
+        [ h1 [] [ text "Tokonoma" ]
+        , Html.Styled.form [ onSubmit PerformLogin ]
             [ input
                 [ onInput OnUsernameInput
                 , autofocus True
@@ -128,13 +129,14 @@ view model =
 
 styling =
     { login =
-        [ backgroundColor colors.white
-        , padding (rem 1)
+        [ backgroundColor colors.offwhite
+        , padding (rem 1.5)
         , width (rem 25)
         , margin2 (vh 25) auto
         , Global.descendants
-            [ Global.button
-                [ backgroundColor colors.blue
+            [ Global.h1 [ marginBottom (rem 2) ]
+            , Global.button
+                [ backgroundColor colors.black
                 , padding2 (rem 0.5) (rem 1)
                 , color colors.white
                 , width (pct 100)

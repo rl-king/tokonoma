@@ -58,6 +58,7 @@ postNewResource title body files =
             Encode.object
                 [ ( "_ntitle", Encode.string title )
                 , ( "_nbody", Encode.string body )
+                , ( "_nfiles", Encode.list File.encode files )
                 ]
     in
     Http.toTask <|

@@ -12,6 +12,7 @@ import Html.Styled.Attributes
     exposing
         ( attribute
         , autofocus
+        , class
         , css
         , disabled
         , id
@@ -40,9 +41,15 @@ port onFileUpload : (Decode.Value -> msg) -> Sub msg
 port onSelectFile : String -> Cmd msg
 
 
+
+-- SUBSCRIPTIONS
+
+
 subscriptions : Sub Msg
 subscriptions =
-    onFileUpload (GotFileUpload << File.decodeFileUpload)
+    onFileUpload <|
+        GotFileUpload
+            << Decode.decodeValue (Decode.list File.decode)
 
 
 
@@ -54,7 +61,15 @@ type alias Model =
     , title : String
     , body : String
     , files : List File
+    , saveStatus : SaveStatus
     }
+
+
+type SaveStatus
+    = Unsaved
+    | Saved
+    | Edited
+    | Error
 
 
 init : Session.Data -> ( Model, Cmd Msg )
@@ -63,6 +78,7 @@ init session =
       , title = ""
       , body = ""
       , files = []
+      , saveStatus = Unsaved
       }
     , Cmd.none
     )
@@ -76,7 +92,9 @@ type Msg
     = OnTitleInput String
     | OnBodyInput String
     | SaveResource
+    | DeleteResource
     | GotSaveResource (Result Http.Error ())
+    | GotDeleteResource (Result Http.Error ())
     | GotFileUpload (Result Decode.Error (List File))
     | OnSelectFile String
 
@@ -99,11 +117,26 @@ update msg model =
                 Request.postNewResource model.title model.body model.files
             )
 
-        GotSaveResource _ ->
-            ( model, Cmd.none )
+        DeleteResource ->
+            ( model
+            , Task.attempt GotDeleteResource <|
+                Request.deleteResource 1
+            )
+
+        GotSaveResource (Ok _) ->
+            ( { model | saveStatus = Saved }, Cmd.none )
+
+        GotSaveResource (Err _) ->
+            ( { model | saveStatus = Error }, Cmd.none )
+
+        GotDeleteResource (Ok _) ->
+            ( { model | saveStatus = Saved }, Cmd.none )
+
+        GotDeleteResource (Err _) ->
+            ( { model | saveStatus = Error }, Cmd.none )
 
         GotFileUpload (Ok files) ->
-            ( { model | files = files }, Cmd.none )
+            ( { model | files = files ++ model.files }, Cmd.none )
 
         GotFileUpload (Err _) ->
             ( model, Cmd.none )
@@ -115,48 +148,142 @@ update msg model =
 
 view : Model -> Html Msg
 view model =
-    let
-        disable =
-            String.isEmpty model.title || String.isEmpty model.body
-    in
-    Html.Styled.form [ onSubmit SaveResource, css styling.newResource ]
-        [ input
-            [ onInput OnTitleInput
-            , placeholder "New resource"
-            , value model.title
-            ]
-            []
-        , textarea
+    main_ [ css styling.main ]
+        [ viewMainEdit model
+        , viewMetaData model
+        ]
+
+
+viewMainEdit : Model -> Html Msg
+viewMainEdit model =
+    section [ css styling.mainEdit ]
+        [ textarea
             [ onInput OnBodyInput
             , value model.body
+            ]
+            []
+        ]
+
+
+viewMetaData : Model -> Html Msg
+viewMetaData model =
+    section [ css styling.metaData ]
+        [ viewMetaDataStatus model
+        , input
+            [ onInput OnTitleInput
+            , placeholder "Title"
+            , value model.title
             ]
             []
         , input
             [ type_ "file"
             , attribute "multiple" "true"
+            , placeholder "Main content"
             , id "file-input"
             , on "change" <|
                 Decode.succeed (OnSelectFile "file-input")
             ]
             []
-        , div [] (List.map (\{ filename } -> img [ src filename ] []) model.files)
-        , button [ disabled disable ] [ text "Save" ]
+        , viewFiles model.files
         ]
 
 
+viewMetaDataStatus : Model -> Html Msg
+viewMetaDataStatus model =
+    div [ css styling.metaDataStatus ]
+        [ button
+            [ disabled (String.isEmpty model.title)
+            , onClick SaveResource
+            , class (saveStatusToString model.saveStatus)
+            ]
+            [ text (saveStatusToString model.saveStatus) ]
+        ]
+
+
+viewFiles : List File -> Html msg
+viewFiles files =
+    Keyed.node "div" [ css styling.files ] <|
+        List.map viewFile files
+
+
+viewFile : File -> ( String, Html msg )
+viewFile { path } =
+    ( path, img [ src path ] [] )
+
+
+
+-- SAVESTATUS
+
+
+saveStatusToString : SaveStatus -> String
+saveStatusToString saveStatus =
+    case saveStatus of
+        Unsaved ->
+            "Unsaved"
+
+        Saved ->
+            "Saved"
+
+        Edited ->
+            "Edited"
+
+        Error ->
+            "Error"
+
+
+
+-- STYLING
+
+
 styling =
-    { newResource =
-        [ padding (rem 1)
+    { main =
+        [ Breakpoint.small [ displayFlex ]
+        , width (pct 100)
+        , padding (rem 2)
+        ]
+    , mainEdit =
+        [ paddingRight (rem 2)
         , backgroundColor colors.white
         , marginTop (rem 0.5)
-        , boxShadow4 (rem 0.5) (rem 0.5) zero colors.lightGrey
         , marginBottom (rem 2)
+        , width (pct 100)
+        ]
+    , metaData =
+        [ backgroundColor colors.white
+        , marginTop (rem 0.5)
+        , marginBottom (rem 2)
+        , width (rem 30)
+        ]
+    , metaDataStatus =
+        [ marginBottom (rem 1)
+        , padding (rem 1)
+        , backgroundColor colors.lightGrey
+        , displayFlex
+        , fontWeight (int 500)
+        , justifyContent spaceBetween
+        , alignItems center
         , Global.descendants
             [ Global.button
-                [ Css.disabled
-                    [ color colors.greyLighter
-                    , cursor notAllowed
+                [ color colors.white
+                , Css.disabled
+                    [ cursor notAllowed
                     ]
+                , Global.withClass (saveStatusToString Unsaved)
+                    [ backgroundColor colors.red ]
+                , Global.withClass (saveStatusToString Saved)
+                    [ backgroundColor colors.green ]
+                , Global.withClass (saveStatusToString Edited)
+                    [ backgroundColor colors.blue ]
+                ]
+            ]
+        ]
+    , files =
+        [ Global.descendants
+            [ Global.img
+                [ height (rem 6)
+                , width (rem 6)
+                , margin4 zero (rem 1) (rem 1) zero
+                , property "object-fit" "cover"
                 ]
             ]
         ]

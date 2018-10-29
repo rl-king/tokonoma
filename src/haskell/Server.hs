@@ -30,7 +30,7 @@ import System.IO
 import qualified System.Log.FastLogger as Log
 
 import qualified Database as DB
-import Database (Database, Resource(..), NewFile(..))
+import Database (Database, Resource(..), FileInfo(..))
 
 
 data State =
@@ -72,7 +72,7 @@ type Protected =
   "resources" :> ReqBody '[JSON] DB.NewResource :> PostCreated '[JSON] NoContent :<|>
   "resources" :> Get '[JSON] [Resource] :<|>
   "resources" :> Capture "resourceid" Int :> DeleteNoContent '[JSON] NoContent :<|>
-  "file" :> MultipartForm Mem (MultipartData Mem) :> Post '[JSON] [Text]
+  "file" :> MultipartForm Mem (MultipartData Mem) :> Post '[JSON] [FileInfo]
 
 
 type Public =
@@ -168,7 +168,7 @@ protected authResult =
 
 
 addResource :: DB.NewResource -> AppM NoContent
-addResource new@(DB.NewResource title _)= do
+addResource new@(DB.NewResource title _ _)= do
   -- log
   logset <- asks logger
   currentTime <- liftIO getCurrentTime
@@ -221,7 +221,7 @@ logout cookieSettings =
   return $ clearSession cookieSettings NoContent
 
 
-fileUpload :: MultipartData Mem -> AppM [Text]
+fileUpload :: MultipartData Mem -> AppM [FileInfo]
 fileUpload multipartData = do
   -- log
   logset <- asks logger
@@ -233,9 +233,17 @@ fileUpload multipartData = do
   -- write to disk
   liftIO $ forM_ files'
     (\file -> LBS.writeFile ("static/files/" ++ Text.unpack (fdFileName file)) (fdPayload file))
-  return $ fmap (\f -> Text.pack ("/files/" ++ Text.unpack (fdFileName f))) files'
+  return $ fileUploadResponse files'
     where files' = files multipartData
 
+
+fileUploadResponse :: [FileData a] -> [FileInfo]
+fileUploadResponse =
+  fmap toFileData
+  where toFileData file =
+          FileInfo
+          (fdFileName file) $
+          Text.pack ("/files/" ++ Text.unpack (fdFileName file))
 
 -- USER
 

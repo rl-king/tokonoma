@@ -100,15 +100,15 @@ update msg model =
         OnUrlChange url ->
             onNavigation url model
 
+        OnUrlRequest (Browser.External href) ->
+            ( model, Navigation.load href )
+
         OnUrlRequest (Browser.Internal url) ->
             let
                 key =
                     Session.getNavKey (toSession model)
             in
             ( model, Navigation.pushUrl key (Url.toString url) )
-
-        OnUrlRequest (Browser.External href) ->
-            ( model, Navigation.load href )
 
         LoginMsg loginMsg ->
             case model.page of
@@ -204,13 +204,13 @@ viewPage model =
     let
         wrap msg pageView =
             section []
-                [ View.Header.view PerformLogout
+                [ View.Header.view PerformLogout (toSession model)
                 , Html.Styled.map msg pageView
                 ]
     in
     case model.page of
         Login loginModel ->
-            wrap LoginMsg <|
+            Html.Styled.map LoginMsg <|
                 Login.view loginModel
 
         Resources resourcesModel ->
@@ -313,13 +313,13 @@ globalStyling =
     , Global.html
         [ margin zero
         , padding zero
-        , backgroundColor colors.offwhite
+        , backgroundColor colors.white
+        , fontSize (pct 87.5)
+        , lineHeight (rem 1.5)
         ]
     , Global.body
         [ margin zero
         , padding zero
-        , fontSize (pct 87.5)
-        , lineHeight (rem 1.5)
         , fontFamilies
             [ "-apple-system"
             , "BlinkMacSystemFont"
@@ -368,11 +368,6 @@ globalStyling =
         [ textDecoration none
         , color colors.black
         , hover [ textDecoration underline ]
-        ]
-    , Global.img
-        [ maxWidth (rem 10)
-        , width (pct 100)
-        , margin2 (rem 1) zero
         ]
     , Global.button
         [ backgroundColor colors.lightGrey

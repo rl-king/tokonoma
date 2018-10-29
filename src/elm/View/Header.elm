@@ -3,10 +3,10 @@ module View.Header exposing (view)
 import Css exposing (..)
 import Css.Breakpoint as Breakpoint
 import Css.Global as Global exposing (global)
+import Data.Auth as Auth exposing (Auth)
 import Data.File as File exposing (File)
-import Data.Request as Request
-import Data.Resource as Resource exposing (Resource)
 import Data.Session as Session
+import Data.User as User exposing (User)
 import Html.Styled exposing (..)
 import Html.Styled.Attributes
     exposing
@@ -14,17 +14,34 @@ import Html.Styled.Attributes
         , href
         )
 import Html.Styled.Events exposing (onClick)
-import Specification exposing (colors)
+import Specification exposing (colors, ms)
 
 
-view : msg -> Html msg
-view msg =
+view : msg -> Session.Data -> Html msg
+view msg session =
     header [ css styling.header ]
         [ a [ href "/" ] [ h1 [] [ text "Tokonoma" ] ]
-        , section [ css styling.headerUser ]
-            [ button [ onClick msg, css styling.logout ] [ text "Logout" ]
+        , nav []
+            [ a [ href "/" ] [ text "Overview" ]
+            , a [ href "/edit" ] [ text "New" ]
             ]
+        , viewUser msg (Session.getAuth session)
         ]
+
+
+viewUser : msg -> Auth -> Html msg
+viewUser msg auth =
+    case auth of
+        Auth.Auth user ->
+            div [ css styling.headerUser ]
+                [ text user.username
+                , div []
+                    [ button [ onClick msg, css styling.logout ] [ text "Logout" ]
+                    ]
+                ]
+
+        _ ->
+            text ""
 
 
 styling =
@@ -36,15 +53,42 @@ styling =
         , justifyContent spaceBetween
         , alignItems center
         , Global.descendants
-            [ Global.a [ color colors.white ] ]
+            [ Global.a
+                [ color colors.white
+                , fontSize (ms 1)
+                ]
+            , Global.nav
+                [ width (pct 100)
+                , marginLeft (rem 4)
+                , marginTop (px 4)
+                , Global.descendants
+                    [ Global.a
+                        [ marginRight (rem 2) ]
+                    ]
+                ]
+            ]
         ]
     , headerUser =
         [ displayFlex
         , justifyContent flexEnd
         , alignItems center
-        , Global.descendants
-            [ Global.button
-                [ marginLeft (rem 1) ]
+        , position relative
+        , fontSize (ms 1)
+        , fontWeight (int 500)
+        , Global.children
+            [ Global.div
+                [ display none
+                , position absolute
+                , bottom zero
+                , right (rem -2)
+                , transform (translateY (pct 100))
+                , padding (rem 2)
+                , backgroundColor colors.black
+                ]
+            ]
+        , hover
+            [ Global.children
+                [ Global.div [ display block ] ]
             ]
         ]
     , logout =

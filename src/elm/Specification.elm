@@ -1,6 +1,7 @@
-module Specification exposing (colors)
+module Specification exposing (colors, ms)
 
-import Css exposing (hex)
+import Css exposing (hex, rem)
+import ModularScale
 
 
 colors =
@@ -10,7 +11,7 @@ colors =
     , darkGrey = hex "1f1f1f"
     , black = hex "111"
     , white = hex "fff"
-    , green = hex "43DCC1"
+    , green = hex "7ED58D"
     , red = hex "FD3740"
     , yellow = hex "F1D027"
     , blue = hex "3CA5EA"
@@ -18,3 +19,14 @@ colors =
     , purple = hex "7F63D2"
     , pink = hex "f9b2e1"
     }
+
+
+msConfig : ModularScale.Config
+msConfig =
+    ModularScale.config [ 1 ]
+        ModularScale.MinorThird
+
+
+ms : Int -> Css.Rem
+ms x =
+    rem (ModularScale.get msConfig x)

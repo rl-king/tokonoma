@@ -7,7 +7,7 @@ import Data.Request as Request
 import Data.Resource as Resource exposing (Resource)
 import Data.Session as Session
 import Html.Styled exposing (..)
-import Html.Styled.Attributes exposing (..)
+import Html.Styled.Attributes exposing (css, src)
 import Html.Styled.Events exposing (on, onClick, onInput, onSubmit)
 import Html.Styled.Keyed as Keyed
 import Http
@@ -28,8 +28,7 @@ type alias Model =
 
 init : Session.Data -> ( Model, Cmd Msg )
 init session =
-    ( { session = session
-      }
+    ( { session = session }
     , Task.attempt GotResources Request.getResources
     )
 
@@ -39,24 +38,20 @@ init session =
 
 
 type Msg
-    = DeleteResource Int
-    | GotResources (Result Http.Error (List Resource))
+    = GotResources (Result Http.Error (List Resource))
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
-        DeleteResource id ->
-            ( { model | session = Session.deleteResource id model.session }
-            , Task.attempt GotResources <|
-                Task.andThen (\_ -> Request.getResources) <|
-                    Request.deleteResource id
-            )
-
         GotResources (Ok resources) ->
             ( { model | session = Session.insertResources resources model.session }, Cmd.none )
 
         GotResources (Err err) ->
+            let
+                _ =
+                    Debug.log "rsc err" err
+            in
             ( model, Cmd.none )
 
 
@@ -66,42 +61,64 @@ update msg model =
 
 view : Model -> Html Msg
 view model =
-    section [] <|
+    section [ css styling.resources ] <|
         List.map viewResource <|
             Session.getResources model.session
 
 
 viewResource : Resource -> Html Msg
-viewResource { title, id, created, body } =
+viewResource { title, id, created, body, files } =
     div [ css styling.resource ]
         [ section []
-            [ span [] [ text "Id: ", text (String.fromInt id) ]
-            , text " | "
-            , time []
-                [ text "Created: "
-                , text (String.fromInt (Time.posixToMillis created))
-                , h2 [] [ text title ]
+            [ header []
+                [ span [] [ text "Id: ", text (String.fromInt id) ]
+                , text " | "
+                , time []
+                    [ text "Created: "
+                    , text (String.fromInt (Time.posixToMillis created))
+                    , h2 [] [ text title ]
+                    ]
                 ]
-            , Html.Styled.fromUnstyled <|
-                Markdown.toHtml [] body
+            , div [ css styling.content ]
+                [ Html.Styled.fromUnstyled <|
+                    Markdown.toHtml [] body
+                , div [] (List.map (\{ path } -> img [ src path ] []) files)
+                ]
             ]
-        , button [ onClick (DeleteResource id) ] [ text "delete" ]
         ]
+
+
+
+-- STYLING
 
 
 styling =
-    { resource =
-        [ padding (rem 1)
-        , backgroundColor colors.white
-        , marginTop (rem 0.5)
-        , displayFlex
-        , justifyContent spaceBetween
-        , alignItems flexEnd
+    { resources = [ padding (rem 2) ]
+    , resource =
+        [ backgroundColor colors.offwhite
+        , marginBottom (rem 1)
         , Global.descendants
             [ Global.button
-                [ color colors.red
-                , backgroundColor transparent
+                [ color colors.white
+                , backgroundColor colors.red
+                ]
+            , Global.header
+                [ width (pct 100)
+                , backgroundColor colors.lightGrey
+                , padding2 (rem 0.5) (rem 1)
+                ]
+            , Global.footer
+                [ width (pct 100)
+                , backgroundColor colors.lightGrey
+                , padding2 (rem 0.5) (rem 1)
+                , displayFlex
+                , justifyContent flexEnd
+                ]
+            , Global.img
+                [ maxWidth (rem 10)
+                , margin4 zero (rem 1) (rem 1) zero
                 ]
             ]
         ]
+    , content = [ padding2 (rem 1) (rem 1) ]
     }
