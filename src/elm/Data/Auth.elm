@@ -7,7 +7,7 @@ import Http
 type Auth
     = Auth User
     | Anonymous
-    | Loading
+    | Unknown
 
 
 fromResult : Result Http.Error User -> Auth

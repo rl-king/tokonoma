@@ -71,7 +71,7 @@ update msg model =
 
         GotPerformLogin (Ok user) ->
             ( { model | session = Session.insertAuth (Auth user) model.session }
-            , Cmd.none
+            , Navigation.replaceUrl (Session.getNavKey model.session) "/"
             )
 
         GotPerformLogin (Err err) ->

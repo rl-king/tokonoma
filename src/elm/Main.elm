@@ -69,8 +69,7 @@ subscriptions model =
 
 
 type alias Model =
-    { key : Navigation.Key
-    , page : Page
+    { page : Page
     }
 
 
@@ -78,13 +77,14 @@ type Page
     = Resources Resources.Model
     | Edit Edit.Model
     | Login Login.Model
-    | Loading Session.Data
     | NotFound Session.Data
+    | Status Session.Data
 
 
 init : flags -> Url -> Navigation.Key -> ( Model, Cmd Msg )
 init _ url key =
-    ( { key = key, page = Loading Session.init }
+    ( { page = Status (Session.init key)
+      }
     , Task.attempt (GotStatus url) Request.getStatus
     )
 
@@ -111,7 +111,11 @@ update msg model =
             onNavigation url model
 
         OnUrlRequest (Browser.Internal url) ->
-            ( model, Navigation.pushUrl model.key (Url.toString url) )
+            let
+                key =
+                    Session.getNavKey (toSession model)
+            in
+            ( model, Navigation.pushUrl key (Url.toString url) )
 
         OnUrlRequest (Browser.External href) ->
             ( model, Navigation.load href )
@@ -148,18 +152,38 @@ update msg model =
             )
 
         GotLogout result ->
-            ( model
-            , Cmd.none
-            )
+            let
+                key =
+                    Session.getNavKey (toSession model)
+            in
+            ( model, Navigation.pushUrl key "/login" )
 
         GotStatus url result ->
-            onNavigation url
-                { model
-                    | page = Loading (Session.insertAuth (Auth.fromResult result) Session.init)
-                }
+            let
+                key =
+                    Session.getNavKey (toSession model)
+            in
+            case Auth.fromResult result of
+                Auth.Anonymous ->
+                    ( model
+                    , Navigation.replaceUrl key <|
+                        Builder.absolute [ "login" ] [ Builder.string "red" (Url.toString url) ]
+                    )
+
+                Auth.Auth user ->
+                    let
+                        session =
+                            toSession model
+                    in
+                    onNavigation url
+                        { model | page = Status (Session.insertAuth (Auth.Auth user) session) }
+
+                Auth.Unknown ->
+                    ( model, Cmd.none )
 
 
 
+-- ( {model = }, Navigation.pushUrl model.key "/login" )
 -- VIEW
 
 
@@ -211,6 +235,21 @@ viewPage model =
 
 
 -- ROUTING
+-- mapPageSession : (Session.Data -> Session.Data) -> Page -> Page
+-- mapPageSession fn page =
+--     case page of
+--         Resources m ->
+--             Resources { m | session = fn m.session }
+--         Edit m ->
+--             fn m.session
+--         Login m ->
+--             fn m.session
+--         Loading s ->
+--             fn
+--                 s
+--         NotFound s ->
+--             fn s
+--                 s
 
 
 toSession : Model -> Session.Data
@@ -225,7 +264,7 @@ toSession model =
         Login m ->
             m.session
 
-        Loading s ->
+        Status s ->
             s
 
         NotFound s ->
@@ -244,9 +283,11 @@ onNavigation url model =
                     step model Resources ResourcesMsg (Resources.init session)
                 , route (Parser.s "edit") <|
                     step model Edit EditMsg (Edit.init session)
+                , route (Parser.s "login") <|
+                    step model Login LoginMsg (Login.init session)
                 ]
     in
-    case Session.auth session of
+    case Session.getAuth session of
         Auth.Auth user ->
             Parser.parse parser url
                 |> Maybe.withDefault

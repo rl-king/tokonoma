@@ -1,6 +1,8 @@
 module Data.Session exposing
     ( Data
-    , auth
+    , deleteResource
+    , getAuth
+    , getNavKey
     , getResources
     , init
     , insertAuth
@@ -20,6 +22,7 @@ import Dict exposing (Dict)
 type Data
     = Data
         { auth : Auth
+        , navKey : Navigation.Key
         , resources : Dict Int Resource
         }
 
@@ -28,10 +31,11 @@ type Data
 -- INSERT
 
 
-init : Data
-init =
+init : Navigation.Key -> Data
+init key =
     Data
         { auth = Anonymous
+        , navKey = key
         , resources = Dict.empty
         }
 
@@ -50,8 +54,13 @@ insertResources resources (Data data) =
 -- GET
 
 
-auth : Data -> Auth
-auth (Data data) =
+getNavKey : Data -> Navigation.Key
+getNavKey (Data data) =
+    data.navKey
+
+
+getAuth : Data -> Auth
+getAuth (Data data) =
     data.auth
 
 
@@ -60,3 +69,12 @@ getResources (Data data) =
     List.sortBy (negate << .id) <|
         List.map Tuple.second <|
             Dict.toList data.resources
+
+
+
+-- DELETE
+
+
+deleteResource : Int -> Data -> Data
+deleteResource id (Data data) =
+    Data { data | resources = Dict.remove id data.resources }

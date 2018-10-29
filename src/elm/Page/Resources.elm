@@ -47,7 +47,7 @@ update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
         DeleteResource id ->
-            ( model
+            ( { model | session = Session.deleteResource id model.session }
             , Task.attempt GotResources <|
                 Task.andThen (\_ -> Request.getResources) <|
                     Request.deleteResource id
