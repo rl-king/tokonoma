@@ -79,6 +79,7 @@ type Page
     | Login Login.Model
     | NotFound Session.Data
     | Status Session.Data
+    | Redirect Session.Data
 
 
 init : flags -> Url -> Navigation.Key -> ( Model, Cmd Msg )
@@ -176,7 +177,7 @@ update msg model =
                             toSession model
                     in
                     onNavigation url
-                        { model | page = Status (Session.insertAuth (Auth.Auth user) session) }
+                        { model | page = Redirect (Session.insertAuth (Auth.Auth user) session) }
 
                 Auth.Unknown ->
                     ( model, Cmd.none )
@@ -265,6 +266,9 @@ toSession model =
             m.session
 
         Status s ->
+            s
+
+        Redirect s ->
             s
 
         NotFound s ->

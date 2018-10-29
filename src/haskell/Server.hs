@@ -16,9 +16,10 @@ import qualified Data.Text as Text
 import Data.Time.Clock (UTCTime, getCurrentTime)
 import Data.Time.Clock.POSIX (getPOSIXTime)
 import GHC.Generics (Generic)
+import Network.HTTP.Types (status200)
 import qualified Network.Wai.Handler.Warp as Warp
-import Network.Wai (Middleware)
--- import Network.Wai.Application.Static
+import Network.Wai (Middleware, responseLBS)
+import Network.Wai.Application.Static
 import Network.Wai.Middleware.Gzip
 import Network.Wai.Middleware.RequestLogger
 import Network.Wai.Middleware.RequestLogger.JSON
@@ -102,6 +103,9 @@ hoistContext =
 --   def { outputFormat = CustomOutputFormatWithDetails formatAsJSON }
 
 
+-- RUN
+
+
 run :: IO ()
 run = do
   key <- generateKey
@@ -147,7 +151,7 @@ server cookieSettings jwtSettings =
   public cookieSettings jwtSettings
 
 
--- ROUTES
+-- PROTECTED
 
 
 protected :: Server.AuthResult User -> ServerT Protected AppM
@@ -196,11 +200,20 @@ allResources = do
   liftIO $ fmap DB.all . atomically $ readTVar db
 
 
+-- PUBLIC
+
+
 public :: CookieSettings -> JWTSettings -> ServerT Public AppM
 public cookieSettings jwtSettings =
   logout cookieSettings :<|>
   login cookieSettings jwtSettings :<|>
-  Servant.serveDirectory "./static"
+  Servant.serveDirectoryWith ((defaultWebAppSettings "./static") { ss404Handler = Just indexHtml })
+
+
+indexHtml :: Application
+indexHtml _ respond = do
+  file <- liftIO $ LBS.readFile "static/index.html"
+  respond $ responseLBS status200 [] file
 
 
 logout :: CookieSettings -> AppM (CredHeaders NoContent)
