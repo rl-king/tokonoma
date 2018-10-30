@@ -1,5 +1,6 @@
 port module Page.Edit exposing (Model, Msg, init, subscriptions, update, view)
 
+import Browser.Navigation as Navigation
 import Css exposing (..)
 import Css.Breakpoint as Breakpoint
 import Css.Global as Global exposing (global)
@@ -72,15 +73,25 @@ type SaveStatus
     | Error
 
 
-init : Session.Data -> ( Model, Cmd Msg )
-init session =
+init : Session.Data -> Maybe Int -> ( Model, Cmd Msg )
+init session maybeId =
+    let
+        maybeGetExisting =
+            case maybeId of
+                Nothing ->
+                    Cmd.none
+
+                Just id ->
+                    Task.attempt GotExistingResource <|
+                        Request.getResource id
+    in
     ( { session = session
       , title = ""
       , body = ""
       , files = []
       , saveStatus = Unsaved
       }
-    , Cmd.none
+    , maybeGetExisting
     )
 
 
@@ -93,7 +104,8 @@ type Msg
     | OnBodyInput String
     | SaveResource
     | DeleteResource
-    | GotSaveResource (Result Http.Error ())
+    | GotExistingResource (Result Http.Error Resource)
+    | GotSaveResource (Result Http.Error Int)
     | GotDeleteResource (Result Http.Error ())
     | GotFileUpload (Result Decode.Error (List File))
     | OnSelectFile String
@@ -123,8 +135,24 @@ update msg model =
                 Request.deleteResource 1
             )
 
-        GotSaveResource (Ok _) ->
-            ( { model | saveStatus = Saved }, Cmd.none )
+        GotExistingResource (Ok resource) ->
+            ( { model
+                | title = resource.title
+                , body = resource.body
+                , files = resource.files
+              }
+            , Cmd.none
+            )
+
+        GotExistingResource (Err _) ->
+            ( model, Cmd.none )
+
+        GotSaveResource (Ok id) ->
+            ( { model | saveStatus = Saved }
+            , Navigation.replaceUrl
+                (Session.getNavKey model.session)
+                ("/edit/" ++ String.fromInt id)
+            )
 
         GotSaveResource (Err _) ->
             ( { model | saveStatus = Error }, Cmd.none )

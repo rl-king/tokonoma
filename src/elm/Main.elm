@@ -267,10 +267,11 @@ onNavigation url model =
             Parser.oneOf
                 [ route Parser.top <|
                     step model Resources ResourcesMsg (Resources.init session)
+                , route (Parser.s "edit" </> Parser.int) <|
+                    \id -> step model Edit EditMsg (Edit.init session (Just id))
                 , route (Parser.s "edit") <|
-                    step model Edit EditMsg (Edit.init session)
-                , route (Parser.s "login" <?> Query.string "redirect") <|
-                    (step model Login LoginMsg << Login.init session)
+                    step model Edit EditMsg (Edit.init session Nothing)
+                , loginParser
                 ]
 
         loginParser =

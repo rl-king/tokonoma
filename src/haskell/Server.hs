@@ -4,13 +4,14 @@
 {-# LANGUAGE TypeOperators #-}
 module Server where
 
-import Control.Concurrent.STM.TVar (TVar, newTVar, readTVar, modifyTVar)
+import Control.Concurrent.STM.TVar (TVar, newTVar, readTVarIO, readTVar, modifyTVar)
 import Control.Monad (forM_)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.STM (atomically)
 import Control.Monad.Trans.Reader (ReaderT, ask, asks, runReaderT)
 import Data.Aeson (FromJSON, ToJSON)
 import Data.ByteString.Lazy as LBS
+import Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as Text
 import Data.Time.Clock (getCurrentTime)
@@ -42,8 +43,10 @@ type Api =
 
 type Private =
   "status" :> Get '[JSON] Identity :<|>
-  "resources" :> ReqBody '[JSON] DB.NewResource :> PostCreated '[JSON] NoContent :<|>
+  "resources" :> ReqBody '[JSON] DB.NewResource :> PostCreated '[JSON] Int :<|>
+  -- "resources" :> ReqBody '[JSON] DB.NewResource :> Patch '[JSON] Int :<|>
   "resources" :> Get '[JSON] [Resource] :<|>
+  "resources" :> Capture "resourceid" Int :> Get '[JSON] Resource :<|>
   "resources" :> Capture "resourceid" Int :> DeleteNoContent '[JSON] NoContent :<|>
   "file" :> MultipartForm Mem (MultipartData Mem) :> Post '[JSON] [FileInfo]
 
@@ -148,21 +151,24 @@ private authResult =
   case authResult of
     Server.Authenticated user ->
       return user :<|>
-      handleAddResource :<|>
-      handleAllResources :<|>
+      handlePostResource :<|>
+      handleGetResources :<|>
+      handleGetResource :<|>
       handleDeleteResource :<|>
       handleFileUpload
     _ ->
       throwAll err401
 
 
-handleAddResource :: DB.NewResource -> AppM NoContent
-handleAddResource new@(DB.NewResource title _ _)= do
+handlePostResource :: DB.NewResource -> AppM Int
+handlePostResource new@(DB.NewResource title _ _)= do
   posix <- liftIO $ fromInteger . round <$> getPOSIXTime
   State{database = db} <- ask
-  liftIO $ atomically $ modifyTVar db (DB.insert new posix)
+  db' <- liftIO $ readTVarIO db
+  let uid = (+1) . Prelude.maximum $ Map.keys db'
+  liftIO $ atomically $ modifyTVar db (DB.insert uid new posix)
   log' ("Adding: " <> title)
-  return NoContent
+  return uid
 
 
 handleDeleteResource :: Int -> AppM NoContent
@@ -173,10 +179,21 @@ handleDeleteResource uid = do
   return NoContent
 
 
-handleAllResources :: AppM [Resource]
-handleAllResources = do
+handleGetResources :: AppM [Resource]
+handleGetResources = do
   State{database = db} <- ask
   liftIO $ fmap DB.all . atomically $ readTVar db
+
+
+handleGetResource :: Int -> AppM Resource
+handleGetResource id' = do
+  State{database = db} <- ask
+  mResource <- liftIO $ fmap (DB.lookup id') . atomically $ readTVar db
+  case mResource of
+    Just resource ->
+      return resource
+    Nothing ->
+      throwAll err404
 
 
 -- PUBLIC
@@ -192,7 +209,7 @@ public cookieSettings jwtSettings =
 
 handleSpa :: Application
 handleSpa _ respond = do
-  file <- liftIO $ LBS.readFile "static/index.html"
+  file <- liftIO $ LBS.readFile "./static/index.html"
   respond $ responseLBS status200 [] file
 
 

@@ -24,10 +24,14 @@ init =
   ]
 
 
-insert :: NewResource -> Int -> Database -> Database
-insert (NewResource title body files) now db =
+insert :: Int -> NewResource -> Int -> Database -> Database
+insert uid (NewResource title body files) now db =
   Map.insert uid (Resource uid title body True now files) db
-  where uid = (+1) . maximum $ Map.keys db
+
+
+lookup :: Int -> Database -> Maybe Resource
+lookup =
+  Map.lookup
 
 
 delete :: Int -> Database -> Database

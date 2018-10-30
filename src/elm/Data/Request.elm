@@ -1,5 +1,6 @@
 module Data.Request exposing
     ( deleteResource
+    , getResource
     , getResources
     , getStatus
     , postFiles
@@ -28,6 +29,13 @@ getResources =
         Http.get "/resources" (Decode.list Resource.decode)
 
 
+getResource : Int -> Task Http.Error Resource
+getResource id =
+    Http.toTask <|
+        Http.get ("/resources/" ++ String.fromInt id)
+            Resource.decode
+
+
 getStatus : Task Http.Error User
 getStatus =
     Http.toTask <|
@@ -51,7 +59,7 @@ postLogin username password =
         Http.post "/login" (Http.jsonBody json) User.decode
 
 
-postNewResource : String -> String -> List File -> Task Http.Error ()
+postNewResource : String -> String -> List File -> Task Http.Error Int
 postNewResource title body files =
     let
         json =
@@ -67,7 +75,7 @@ postNewResource title body files =
             , headers = []
             , url = "/resources"
             , body = Http.jsonBody json
-            , expect = Http.expectStringResponse (\_ -> Ok ())
+            , expect = Http.expectJson Decode.int
             , timeout = Nothing
             , withCredentials = False
             }

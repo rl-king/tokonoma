@@ -60,7 +60,6 @@ styling =
             , Global.nav
                 [ width (pct 100)
                 , marginLeft (rem 4)
-                , marginTop (px 4)
                 , Global.descendants
                     [ Global.a
                         [ marginRight (rem 2) ]
