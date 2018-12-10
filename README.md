@@ -1,13 +1,11 @@
-# Tokonoma | Content management system in Haskell and Elm
+# [WIP] Tokonoma | Content system in Haskell and Elm
 
-## Features
+## Working
 * JWT and Cookie based auth
-* Graph database
-* Mnomonic keybindings (like spacemacs)
-* Serve properly documented API
 
-## Doesn't do
-* Server side template rendering
+## Working on
+* Admin UI
+  * Mnomonic keybindings (like spacemacs)
 
 ## Getting started
 ```
