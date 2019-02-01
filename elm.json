@@ -17,6 +17,7 @@
             "elm/url": "1.0.0",
             "elm-explorations/markdown": "1.0.0",
             "lukewestby/elm-string-interpolate": "1.0.3",
+            "rl-king/elm-modular-scale": "2.0.2",
             "rtfeldman/elm-css": "15.1.0"
         },
         "indirect": {
