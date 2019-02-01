@@ -6,7 +6,7 @@ clearcache:
 	@rm ./cache/*
 
 elm:
-	@elm make --debug ./src/elm/Main.elm --output=./static/elm.js
+	@elm make ./src/elm/Main.elm --output=./static/elm.js
 
 haskell:
 	@stack build

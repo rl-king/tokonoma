@@ -15,6 +15,7 @@
          (function(send) {
              XMLHttpRequest.prototype.send = function(data) {
                  var token = document.cookie.match(new RegExp('XSRF-TOKEN=([^;]+)'))
+                 console.log(token[1]);
                  if (token) {
                      this.setRequestHeader('X-XSRF-TOKEN', token[1]);
                      send.call(this, data);
@@ -26,28 +27,6 @@
 
          const app = Elm.Main.init(null);
 
-         app.ports.onSelectFile.subscribe((id) => {
-             const node = document.getElementById(id);
-             if (node === null) {
-                 return;
-             }
-             const files = Array.from(node.files);
-             const formData = new FormData();
-
-             files.forEach((file) => formData.append("file", file));
-
-             const xhr = new XMLHttpRequest();
-             xhr.onload = (result) => {
-                 app.ports.onFileUpload.send(JSON.parse(result.target.response))
-                 console.log(result)
-                 node.value = null;
-             };
-             xhr.onerror = (error) => {
-                 console.log(error);
-             };
-             xhr.open("POST", "/file", true);
-             xhr.send(formData);
-         });
         </script>
     </body>
 </html>

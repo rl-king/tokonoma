@@ -4,7 +4,7 @@ import Css exposing (..)
 import Css.Breakpoint as Breakpoint
 import Css.Global as Global exposing (global)
 import Data.Auth as Auth exposing (Auth)
-import Data.File as File exposing (File)
+import Data.FileData as FileData exposing (FileData)
 import Data.Session as Session
 import Data.User as User exposing (User)
 import Html.Styled exposing (..)

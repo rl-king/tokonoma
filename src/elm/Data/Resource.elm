@@ -3,7 +3,8 @@ module Data.Resource exposing
     , decode
     )
 
-import Data.File as File exposing (File)
+import Data.FileData exposing (FileData)
+import File exposing (File)
 import Json.Decode as Decode
 import Time
 
@@ -14,7 +15,7 @@ type alias Resource =
     , body : String
     , published : Bool
     , created : Time.Posix
-    , files : List File
+    , files : List FileData
     }
 
 
@@ -26,7 +27,7 @@ decode =
         (Decode.field "_body" Decode.string)
         (Decode.field "_published" Decode.bool)
         (Decode.field "_created" decodePosix)
-        (Decode.field "_files" (Decode.list File.decode))
+        (Decode.field "_files" (Decode.list Data.FileData.decode))
 
 
 decodePosix : Decode.Decoder Time.Posix

@@ -1,13 +1,15 @@
-port module Page.Edit exposing (Model, Msg, init, subscriptions, update, view)
+module Page.Edit exposing (Model, Msg, init, subscriptions, update, view)
 
 import Browser.Navigation as Navigation
 import Css exposing (..)
 import Css.Breakpoint as Breakpoint
 import Css.Global as Global exposing (global)
-import Data.File as File exposing (File)
+import Data.FileData exposing (FileData)
 import Data.Request as Request
 import Data.Resource as Resource exposing (Resource)
 import Data.Session as Session
+import File exposing (File)
+import File.Select
 import Html.Styled exposing (..)
 import Html.Styled.Attributes
     exposing
@@ -33,24 +35,12 @@ import Time
 
 
 
--- PORTS
-
-
-port onFileUpload : (Decode.Value -> msg) -> Sub msg
-
-
-port onSelectFile : String -> Cmd msg
-
-
-
 -- SUBSCRIPTIONS
 
 
 subscriptions : Sub Msg
 subscriptions =
-    onFileUpload <|
-        GotFileUpload
-            << Decode.decodeValue (Decode.list File.decode)
+    Sub.none
 
 
 
@@ -61,7 +51,7 @@ type alias Model =
     { session : Session.Data
     , title : String
     , body : String
-    , files : List File
+    , files : List FileData
     , saveStatus : SaveStatus
     }
 
@@ -107,8 +97,9 @@ type Msg
     | GotExistingResource (Result Http.Error Resource)
     | GotSaveResource (Result Http.Error Int)
     | GotDeleteResource (Result Http.Error ())
-    | GotFileUpload (Result Decode.Error (List File))
-    | OnSelectFile String
+    | SelectFile
+    | FilesSelected File (List File)
+    | GotFileUpload (Result Http.Error ())
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -120,13 +111,27 @@ update msg model =
         OnBodyInput input ->
             ( { model | body = input }, Cmd.none )
 
-        OnSelectFile id ->
-            ( model, onSelectFile id )
+        SelectFile ->
+            ( model
+            , File.Select.files [ "image/png", "image/jpeg" ] FilesSelected
+            )
+
+        FilesSelected file files ->
+            ( model
+            , Task.attempt GotFileUpload <|
+                Request.postFiles (file :: files)
+            )
+
+        GotFileUpload (Ok _) ->
+            ( model, Cmd.none )
+
+        GotFileUpload (Err _) ->
+            ( model, Cmd.none )
 
         SaveResource ->
             ( model
             , Task.attempt GotSaveResource <|
-                Request.postNewResource model.title model.body model.files
+                Request.postNewResource model.title model.body []
             )
 
         DeleteResource ->
@@ -163,12 +168,6 @@ update msg model =
         GotDeleteResource (Err _) ->
             ( { model | saveStatus = Error }, Cmd.none )
 
-        GotFileUpload (Ok files) ->
-            ( { model | files = files ++ model.files }, Cmd.none )
-
-        GotFileUpload (Err _) ->
-            ( model, Cmd.none )
-
 
 
 -- VIEW
@@ -203,15 +202,7 @@ viewMetaData model =
             , value model.title
             ]
             []
-        , input
-            [ type_ "file"
-            , attribute "multiple" "true"
-            , placeholder "Main content"
-            , id "file-input"
-            , on "change" <|
-                Decode.succeed (OnSelectFile "file-input")
-            ]
-            []
+        , button [ onClick SelectFile ] [ text "Upload" ]
         , viewFiles model.files
         ]
 
@@ -228,13 +219,13 @@ viewMetaDataStatus model =
         ]
 
 
-viewFiles : List File -> Html msg
+viewFiles : List FileData -> Html msg
 viewFiles files =
     Keyed.node "div" [ css styling.files ] <|
         List.map viewFile files
 
 
-viewFile : File -> ( String, Html msg )
+viewFile : FileData -> ( String, Html msg )
 viewFile { path } =
     ( path, img [ src path ] [] )
 
